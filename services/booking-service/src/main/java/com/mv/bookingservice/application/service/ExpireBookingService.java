@@ -4,6 +4,7 @@ import com.mv.bookingservice.application.command.ExpireBookingCommand;
 import com.mv.bookingservice.application.port.in.ExpireBookingUseCase;
 import com.mv.bookingservice.application.port.out.LoadBookingPort;
 import com.mv.bookingservice.application.port.out.SaveBookingPort;
+import com.mv.bookingservice.application.port.out.ShowtimeClientPort;
 import com.mv.bookingservice.domain.model.booking.aggregate.Booking;
 import com.mv.bookingservice.domain.model.booking.exception.BookingNotFoundException;
 import lombok.RequiredArgsConstructor;
@@ -16,6 +17,7 @@ public class ExpireBookingService implements ExpireBookingUseCase {
 
     private final LoadBookingPort loadBookingPort;
     private final SaveBookingPort saveBookingPort;
+    private final ShowtimeClientPort showtimeClientPort;
 
     @Override
     @Transactional
@@ -24,6 +26,8 @@ public class ExpireBookingService implements ExpireBookingUseCase {
                 .orElseThrow(() -> new BookingNotFoundException(command.getBookingId()));
 
         booking.expire();
-        return saveBookingPort.save(booking);
+        Booking saved = saveBookingPort.save(booking);
+        showtimeClientPort.releaseHold(saved.getHoldId());
+        return saved;
     }
 }
