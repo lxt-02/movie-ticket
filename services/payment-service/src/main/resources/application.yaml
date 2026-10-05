@@ -25,3 +25,7 @@ logging:
   level:
     com.mv.paymentservice: DEBUG
     org.springframework.web: INFO
+
+clients:
+  booking:
+    base-url: ${BOOKING_SERVICE_URL:http://localhost:8083}
