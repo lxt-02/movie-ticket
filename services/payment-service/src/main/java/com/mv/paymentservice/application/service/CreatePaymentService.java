@@ -54,7 +54,10 @@ public class CreatePaymentService implements CreatePaymentUseCase {
         }
 
         // 2. Validate Booking with Booking Service via Port
-        BookingPaymentContextDto bookingContext = bookingPaymentContextPort.getPaymentContext(command.getBookingId())
+        BookingPaymentContextDto bookingContext = bookingPaymentContextPort.getPaymentContext(
+                        command.getBookingId(),
+                        command.getUserId()
+                )
                 .orElseThrow(() -> new InvalidPaymentException("Booking not found: " + command.getBookingId()));
 
         if (!bookingContext.getUserId().equals(command.getUserId())) {

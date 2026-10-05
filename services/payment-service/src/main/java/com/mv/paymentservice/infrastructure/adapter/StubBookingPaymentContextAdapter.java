@@ -20,12 +20,12 @@ import java.util.UUID;
 public class StubBookingPaymentContextAdapter implements BookingPaymentContextPort {
 
     @Override
-    public Optional<BookingPaymentContextDto> getPaymentContext(UUID bookingId) {
+    public Optional<BookingPaymentContextDto> getPaymentContext(UUID bookingId, UUID userId) {
         // Default stub behavior for standalone testing: returns a valid pending booking context
         return Optional.of(BookingPaymentContextDto.builder()
                 .bookingId(bookingId)
                 .bookingCode("BK-" + bookingId.toString().substring(0, 8).toUpperCase())
-                .userId(UUID.fromString("00000000-0000-0000-0000-000000000001"))
+                .userId(userId != null ? userId : UUID.fromString("00000000-0000-0000-0000-000000000001"))
                 .showtimeId(UUID.randomUUID())
                 .amount(new BigDecimal("150000.00"))
                 .currency("VND")
