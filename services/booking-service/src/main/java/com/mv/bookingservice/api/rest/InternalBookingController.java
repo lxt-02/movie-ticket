@@ -1,15 +1,22 @@
 package com.mv.bookingservice.api.rest;
 
+import com.mv.bookingservice.api.dto.request.ConfirmBookingPaymentRequest;
 import com.mv.bookingservice.api.dto.response.ApiResponse;
 import com.mv.bookingservice.api.dto.response.BookingPaymentContextResponse;
+import com.mv.bookingservice.api.dto.response.BookingResponse;
 import com.mv.bookingservice.api.mapper.BookingDtoMapper;
+import com.mv.bookingservice.application.command.ConfirmBookingCommand;
+import com.mv.bookingservice.application.port.in.ConfirmBookingUseCase;
 import com.mv.bookingservice.application.port.in.GetBookingPaymentContextUseCase;
 import com.mv.bookingservice.application.query.GetBookingPaymentContextQuery;
 import com.mv.bookingservice.domain.model.booking.aggregate.Booking;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -23,6 +30,7 @@ import java.util.UUID;
 public class InternalBookingController {
 
     private final GetBookingPaymentContextUseCase getBookingPaymentContextUseCase;
+    private final ConfirmBookingUseCase confirmBookingUseCase;
     private final BookingDtoMapper bookingDtoMapper;
 
     /**
@@ -44,5 +52,21 @@ public class InternalBookingController {
         Booking booking = getBookingPaymentContextUseCase.execute(query);
         BookingPaymentContextResponse response = bookingDtoMapper.toPaymentContextResponse(booking);
         return ResponseEntity.ok(ApiResponse.success("Booking payment context retrieved", response));
+    }
+
+    @PostMapping("/{id}/payment-succeeded")
+    public ResponseEntity<ApiResponse<BookingResponse>> confirmPaidBooking(
+            @PathVariable UUID id,
+            @Valid @RequestBody ConfirmBookingPaymentRequest request
+    ) {
+        ConfirmBookingCommand command = ConfirmBookingCommand.builder()
+                .bookingId(id)
+                .paymentId(request.getPaymentId())
+                .amount(request.getAmount())
+                .currency(request.getCurrency())
+                .build();
+        Booking booking = confirmBookingUseCase.execute(command);
+        BookingResponse response = bookingDtoMapper.toResponse(booking);
+        return ResponseEntity.ok(ApiResponse.success("Booking confirmed from successful payment", response));
     }
 }

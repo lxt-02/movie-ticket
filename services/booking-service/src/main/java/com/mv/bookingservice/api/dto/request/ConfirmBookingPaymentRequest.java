@@ -1,5 +1,6 @@
-package com.mv.bookingservice.application.command;
+package com.mv.bookingservice.api.dto.request;
 
+import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -14,9 +15,14 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ConfirmBookingCommand {
-    private UUID bookingId;
+public class ConfirmBookingPaymentRequest {
+
+    @NotNull(message = "paymentId must not be null")
     private UUID paymentId;
+
+    @NotNull(message = "amount must not be null")
     private BigDecimal amount;
+
+    @NotNull(message = "currency must not be null")
     private String currency;
 }

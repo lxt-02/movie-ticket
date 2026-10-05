@@ -4,6 +4,7 @@ import com.mv.bookingservice.application.command.CancelBookingCommand;
 import com.mv.bookingservice.application.port.in.CancelBookingUseCase;
 import com.mv.bookingservice.application.port.out.LoadBookingPort;
 import com.mv.bookingservice.application.port.out.SaveBookingPort;
+import com.mv.bookingservice.application.port.out.ShowtimeClientPort;
 import com.mv.bookingservice.domain.model.booking.aggregate.Booking;
 import com.mv.bookingservice.domain.model.booking.exception.BookingNotFoundException;
 import com.mv.bookingservice.domain.model.booking.exception.BookingValidationException;
@@ -17,6 +18,7 @@ public class CancelBookingService implements CancelBookingUseCase {
 
     private final LoadBookingPort loadBookingPort;
     private final SaveBookingPort saveBookingPort;
+    private final ShowtimeClientPort showtimeClientPort;
 
     @Override
     @Transactional
@@ -29,6 +31,8 @@ public class CancelBookingService implements CancelBookingUseCase {
         }
 
         booking.cancel();
-        return saveBookingPort.save(booking);
+        Booking saved = saveBookingPort.save(booking);
+        showtimeClientPort.releaseHold(saved.getHoldId());
+        return saved;
     }
 }

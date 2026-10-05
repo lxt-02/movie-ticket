@@ -4,6 +4,8 @@ import com.mv.bookingservice.application.command.CreateBookingCommand;
 import com.mv.bookingservice.application.command.CreateBookingSeatCommand;
 import com.mv.bookingservice.application.port.out.LoadBookingPort;
 import com.mv.bookingservice.application.port.out.SaveBookingPort;
+import com.mv.bookingservice.application.port.out.ShowtimeClientPort;
+import com.mv.bookingservice.application.port.out.UserClientPort;
 import com.mv.bookingservice.domain.model.booking.aggregate.Booking;
 import com.mv.bookingservice.domain.model.booking.exception.BookingConflictException;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,11 +33,17 @@ class CreateBookingServiceTest {
     @Mock
     private LoadBookingPort loadBookingPort;
 
+    @Mock
+    private ShowtimeClientPort showtimeClientPort;
+
+    @Mock
+    private UserClientPort userClientPort;
+
     private CreateBookingService createBookingService;
 
     @BeforeEach
     void setUp() {
-        createBookingService = new CreateBookingService(saveBookingPort, loadBookingPort);
+        createBookingService = new CreateBookingService(saveBookingPort, loadBookingPort, showtimeClientPort, userClientPort);
     }
 
     @Test
@@ -43,12 +51,11 @@ class CreateBookingServiceTest {
         UUID userId = UUID.randomUUID();
         UUID showtimeId = UUID.randomUUID();
         UUID holdId = UUID.randomUUID();
+        UUID seatId = UUID.randomUUID();
+        UUID showtimeSeatId = UUID.randomUUID();
 
         CreateBookingSeatCommand seatCmd = CreateBookingSeatCommand.builder()
-                .showtimeSeatId(UUID.randomUUID())
-                .seatId(UUID.randomUUID())
-                .seatLabel("A1")
-                .unitPrice(new BigDecimal("100000.00"))
+                .showtimeSeatId(showtimeSeatId)
                 .build();
 
         CreateBookingCommand command = CreateBookingCommand.builder()
@@ -68,7 +75,17 @@ class CreateBookingServiceTest {
                 .build();
 
         when(loadBookingPort.findByUserIdAndIdempotencyKey(userId, "idem-key-1")).thenReturn(Optional.empty());
-        when(loadBookingPort.findByHoldId(holdId)).thenReturn(Optional.empty());
+        when(userClientPort.validateUser(userId)).thenReturn(new UserClientPort.UserValidationResult(userId, "u@example.com", "User", "ACTIVE"));
+        when(showtimeClientPort.holdSeats(eq(showtimeId), any(UUID.class), eq(List.of(showtimeSeatId)), eq("idem-key-1")))
+                .thenReturn(new ShowtimeClientPort.SeatHoldResult(
+                        holdId,
+                        Instant.now().plusSeconds(600),
+                        "Movie 1",
+                        "Cinema 1",
+                        "Screen 1",
+                        Instant.now().plusSeconds(3600),
+                        List.of(new ShowtimeClientPort.HeldSeatDetail(showtimeSeatId, seatId, "A1", new BigDecimal("100000.00")))
+                ));
         when(saveBookingPort.save(any(Booking.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         Booking result = createBookingService.execute(command);
@@ -76,6 +93,7 @@ class CreateBookingServiceTest {
         assertNotNull(result);
         assertEquals(userId, result.getUserId());
         assertEquals("idem-key-1", result.getIdempotencyKey());
+        assertEquals(holdId, result.getHoldId());
         verify(saveBookingPort, times(1)).save(any(Booking.class));
     }
 

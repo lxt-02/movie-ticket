@@ -140,13 +140,12 @@ public class BookingDtoMapper {
             // Build normalized payload representation
             StringBuilder sb = new StringBuilder();
             sb.append(request.getShowtimeId()).append("|")
-              .append(request.getHoldId()).append("|")
               .append(request.getDiscountAmount()).append("|");
 
             if (request.getSeats() != null) {
                 request.getSeats().stream()
                         .sorted((a, b) -> a.getShowtimeSeatId().compareTo(b.getShowtimeSeatId()))
-                        .forEach(s -> sb.append(s.getShowtimeSeatId()).append(":").append(s.getUnitPrice()).append(","));
+                        .forEach(s -> sb.append(s.getShowtimeSeatId()).append(","));
             }
 
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
