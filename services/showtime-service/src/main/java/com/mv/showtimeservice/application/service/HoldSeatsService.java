@@ -9,6 +9,7 @@ import com.mv.showtimeservice.application.port.out.ShowtimeRepositoryPort;
 import com.mv.showtimeservice.application.port.out.ShowtimeSeatRepositoryPort;
 import com.mv.showtimeservice.domain.model.seathold.aggregate.SeatHold;
 import com.mv.showtimeservice.domain.model.seathold.entity.SeatHoldItem;
+import com.mv.showtimeservice.domain.model.seathold.enums.SeatHoldStatus;
 import com.mv.showtimeservice.domain.model.showtime.aggregate.Showtime;
 import com.mv.showtimeservice.domain.model.showtime.entity.ShowtimeSeat;
 import com.mv.showtimeservice.domain.model.seathold.exception.SeatHoldConflictException;
@@ -25,6 +26,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
+
+import static com.mv.showtimeservice.domain.model.showtime.enums.ShowtimeSeatStatus.HELD;
 
 @Service
 @RequiredArgsConstructor
@@ -95,6 +98,11 @@ public class HoldSeatsService implements HoldSeatsUseCase {
                 throw new SeatUnavailableException("Seat " + seat.getId() + " does not belong to showtime " + command.getShowtimeId());
             }
 
+            if (seat.getStatus() == HELD && seat.getLockedUntil() != null && now.isAfter(seat.getLockedUntil())) {
+                expireExistingHold(seat.getHoldId());
+                seat.release();
+            }
+
             if (!seat.isAvailable()) {
                 throw new SeatUnavailableException("Seat " + seat.getSeatLabel() + " is already taken or locked by another transaction");
             }
@@ -125,5 +133,26 @@ public class HoldSeatsService implements HoldSeatsUseCase {
         List<ShowtimeSeat> savedSeats = showtimeSeatRepositoryPort.saveAll(lockedSeats);
 
         return new HoldSeatsResult(savedHold, showtime, savedSeats);
+    }
+
+    private void expireExistingHold(UUID holdId) {
+        if (holdId == null) {
+            return;
+        }
+
+        loadSeatHoldPort.findById(holdId)
+                .filter(hold -> hold.getStatus() == SeatHoldStatus.HELD)
+                .filter(SeatHold::isExpired)
+                .ifPresent(hold -> {
+                    hold.expire();
+                    List<ShowtimeSeat> heldSeats = showtimeSeatRepositoryPort.findByHoldId(hold.getId());
+                    for (ShowtimeSeat heldSeat : heldSeats) {
+                        if (heldSeat.getStatus() == HELD) {
+                            heldSeat.release();
+                        }
+                    }
+                    showtimeSeatRepositoryPort.saveAll(heldSeats);
+                    saveSeatHoldPort.save(hold);
+                });
     }
 }
