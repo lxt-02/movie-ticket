@@ -66,6 +66,43 @@ public class Booking {
             BigDecimal discountAmount,
             List<BookingSeat> seats
     ) {
+        return create(
+                UUID.randomUUID(),
+                userId,
+                showtimeId,
+                movieTitle,
+                cinemaName,
+                screenName,
+                startTime,
+                holdId,
+                idempotencyKey,
+                requestHash,
+                currency,
+                expiresAt,
+                discountAmount,
+                seats
+        );
+    }
+
+    public static Booking create(
+            UUID bookingId,
+            UUID userId,
+            UUID showtimeId,
+            String movieTitle,
+            String cinemaName,
+            String screenName,
+            Instant startTime,
+            UUID holdId,
+            String idempotencyKey,
+            String requestHash,
+            String currency,
+            Instant expiresAt,
+            BigDecimal discountAmount,
+            List<BookingSeat> seats
+    ) {
+        if (bookingId == null) {
+            throw new BookingValidationException("bookingId must not be null");
+        }
         if (userId == null) {
             throw new BookingValidationException("userId must not be null");
         }
@@ -91,7 +128,6 @@ public class Booking {
             throw new BookingValidationException("Booking must contain at least one seat");
         }
 
-        UUID bookingId = UUID.randomUUID();
         String bookingCode = generateBookingCode();
         Instant now = Instant.now();
 
@@ -187,7 +223,7 @@ public class Booking {
     }
 
     public void requestRefund() {
-        if (status != BookingStatus.CONFIRMING && status != BookingStatus.CONFIRMED) {
+        if (status != BookingStatus.PENDING && status != BookingStatus.CONFIRMING && status != BookingStatus.CONFIRMED) {
             throw new InvalidBookingStateException(status, "requestRefund");
         }
         this.status = BookingStatus.REFUND_PENDING;

@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.math.BigDecimal;
 import java.util.UUID;
 
 @Getter
@@ -16,4 +17,6 @@ import java.util.UUID;
 public class ConfirmBookingCommand {
     private UUID bookingId;
     private UUID paymentId;
+    private BigDecimal amount;
+    private String currency;
 }
