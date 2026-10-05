@@ -1,4 +1,4 @@
-package com.mv.bookingservice.domain.exception;
+package com.mv.bookingservice.domain.model.booking.exception;
 
 public class DomainException extends RuntimeException {
     public DomainException(String message) {

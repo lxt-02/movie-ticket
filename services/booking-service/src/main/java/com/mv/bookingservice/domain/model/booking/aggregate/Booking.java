@@ -1,8 +1,9 @@
-package com.mv.bookingservice.domain.aggregate;
+package com.mv.bookingservice.domain.model.booking.aggregate;
 
-import com.mv.bookingservice.domain.exception.BookingValidationException;
-import com.mv.bookingservice.domain.exception.InvalidBookingStateException;
-import com.mv.bookingservice.domain.model.BookingStatus;
+import com.mv.bookingservice.domain.model.booking.exception.BookingValidationException;
+import com.mv.bookingservice.domain.model.booking.exception.InvalidBookingStateException;
+import com.mv.bookingservice.domain.model.booking.entity.BookingSeat;
+import com.mv.bookingservice.domain.model.booking.enums.BookingStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -12,7 +13,9 @@ import lombok.Setter;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Getter
@@ -26,7 +29,6 @@ public class Booking {
     private UUID userId;
     private UUID showtimeId;
     private String movieTitle;
-    private cinemaName; // wait, let's fix type
     private String cinemaName;
     private String screenName;
     private Instant startTime;
@@ -99,8 +101,15 @@ public class Booking {
         }
 
         BigDecimal calculatedSubtotal = BigDecimal.ZERO;
+        Set<UUID> showtimeSeatIds = new HashSet<>();
         for (BookingSeat seat : seats) {
-            seat.setBookingId(bookingId);
+            if (seat == null) {
+                throw new BookingValidationException("Booking seat must not be null");
+            }
+            if (!showtimeSeatIds.add(seat.getShowtimeSeatId())) {
+                throw new BookingValidationException("Duplicate showtimeSeatId in booking: " + seat.getShowtimeSeatId());
+            }
+            seat.assignToBooking(bookingId);
             calculatedSubtotal = calculatedSubtotal.add(seat.getUnitPrice());
         }
 
@@ -165,6 +174,7 @@ public class Booking {
         this.status = BookingStatus.CANCELLED;
         this.cancelledAt = Instant.now();
         this.updatedAt = Instant.now();
+        this.seats.forEach(BookingSeat::cancel);
     }
 
     public void expire() {
@@ -173,6 +183,7 @@ public class Booking {
         }
         this.status = BookingStatus.EXPIRED;
         this.updatedAt = Instant.now();
+        this.seats.forEach(BookingSeat::expire);
     }
 
     public void requestRefund() {
@@ -184,8 +195,12 @@ public class Booking {
     }
 
     public void markRefunded() {
+        if (status != BookingStatus.REFUND_PENDING && status != BookingStatus.CONFIRMED) {
+            throw new InvalidBookingStateException(status, "markRefunded");
+        }
         this.status = BookingStatus.REFUNDED;
         this.updatedAt = Instant.now();
+        this.seats.forEach(BookingSeat::refund);
     }
 
     public boolean isExpired() {

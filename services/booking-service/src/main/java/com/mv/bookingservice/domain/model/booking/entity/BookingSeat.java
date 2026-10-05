@@ -1,6 +1,7 @@
-package com.mv.bookingservice.domain.aggregate;
+package com.mv.bookingservice.domain.model.booking.entity;
 
-import com.mv.bookingservice.domain.model.BookingSeatStatus;
+import com.mv.bookingservice.domain.model.booking.enums.BookingSeatStatus;
+import com.mv.bookingservice.domain.model.booking.exception.BookingValidationException;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -27,16 +28,16 @@ public class BookingSeat {
 
     public static BookingSeat create(UUID bookingId, UUID showtimeSeatId, UUID seatId, String seatLabel, BigDecimal unitPrice) {
         if (showtimeSeatId == null) {
-            throw new IllegalArgumentException("showtimeSeatId must not be null");
+            throw new BookingValidationException("showtimeSeatId must not be null");
         }
         if (seatId == null) {
-            throw new IllegalArgumentException("seatId must not be null");
+            throw new BookingValidationException("seatId must not be null");
         }
         if (seatLabel == null || seatLabel.isBlank()) {
-            throw new IllegalArgumentException("seatLabel must not be blank");
+            throw new BookingValidationException("seatLabel must not be blank");
         }
         if (unitPrice == null || unitPrice.compareTo(BigDecimal.ZERO) < 0) {
-            throw new IllegalArgumentException("unitPrice must be greater than or equal to 0");
+            throw new BookingValidationException("unitPrice must be greater than or equal to 0");
         }
 
         String ticketCode = "TKT-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase();
@@ -51,5 +52,24 @@ public class BookingSeat {
                 .ticketCode(ticketCode)
                 .status(BookingSeatStatus.ACTIVE)
                 .build();
+    }
+
+    public void assignToBooking(UUID bookingId) {
+        if (bookingId == null) {
+            throw new BookingValidationException("bookingId must not be null");
+        }
+        this.bookingId = bookingId;
+    }
+
+    public void cancel() {
+        this.status = BookingSeatStatus.CANCELLED;
+    }
+
+    public void expire() {
+        this.status = BookingSeatStatus.EXPIRED;
+    }
+
+    public void refund() {
+        this.status = BookingSeatStatus.REFUNDED;
     }
 }

@@ -1,4 +1,4 @@
-package com.mv.bookingservice.domain.exception;
+package com.mv.bookingservice.domain.model.booking.exception;
 
 import java.util.UUID;
 

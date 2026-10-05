@@ -1,4 +1,4 @@
-package com.mv.bookingservice.domain.model;
+package com.mv.bookingservice.domain.model.outbox;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

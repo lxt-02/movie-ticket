@@ -1,6 +1,6 @@
-package com.mv.bookingservice.domain.exception;
+package com.mv.bookingservice.domain.model.booking.exception;
 
-import com.mv.bookingservice.domain.model.BookingStatus;
+import com.mv.bookingservice.domain.model.booking.enums.BookingStatus;
 
 public class InvalidBookingStateException extends DomainException {
     public InvalidBookingStateException(String message) {
