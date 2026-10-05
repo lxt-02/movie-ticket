@@ -6,5 +6,5 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface BookingPaymentContextPort {
-    Optional<BookingPaymentContextDto> getPaymentContext(UUID bookingId);
+    Optional<BookingPaymentContextDto> getPaymentContext(UUID bookingId, UUID userId);
 }

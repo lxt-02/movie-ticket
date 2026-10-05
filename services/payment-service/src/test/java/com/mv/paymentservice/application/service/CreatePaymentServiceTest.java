@@ -89,7 +89,7 @@ class CreatePaymentServiceTest {
                 .build();
 
         when(loadPaymentPort.findByUserIdAndIdempotencyKey(userId, "idemp-123")).thenReturn(Optional.empty());
-        when(bookingPaymentContextPort.getPaymentContext(bookingId)).thenReturn(Optional.of(contextDto));
+        when(bookingPaymentContextPort.getPaymentContext(bookingId, userId)).thenReturn(Optional.of(contextDto));
         when(paymentGatewayPort.generatePaymentUrl(any(Payment.class))).thenReturn("https://gateway.example.com/vnpay/pay?paymentId=123");
         when(savePaymentPort.save(any(Payment.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -183,7 +183,7 @@ class CreatePaymentServiceTest {
                 .status("CONFIRMED")
                 .build();
 
-        when(bookingPaymentContextPort.getPaymentContext(bookingId)).thenReturn(Optional.of(contextDto));
+        when(bookingPaymentContextPort.getPaymentContext(bookingId, userId)).thenReturn(Optional.of(contextDto));
 
         assertThatThrownBy(() -> createPaymentService.createPayment(command))
                 .isInstanceOf(InvalidPaymentException.class)
@@ -207,7 +207,7 @@ class CreatePaymentServiceTest {
                 .expiresAt(Instant.now().minus(5, ChronoUnit.MINUTES))
                 .build();
 
-        when(bookingPaymentContextPort.getPaymentContext(bookingId)).thenReturn(Optional.of(contextDto));
+        when(bookingPaymentContextPort.getPaymentContext(bookingId, userId)).thenReturn(Optional.of(contextDto));
 
         assertThatThrownBy(() -> createPaymentService.createPayment(command))
                 .isInstanceOf(PaymentExpiredException.class);

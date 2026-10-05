@@ -2,6 +2,7 @@ package com.mv.paymentservice.application.service;
 
 import com.mv.paymentservice.application.command.PaymentCallbackCommand;
 import com.mv.paymentservice.application.port.in.ProcessPaymentCallbackUseCase;
+import com.mv.paymentservice.application.port.out.BookingConfirmationPort;
 import com.mv.paymentservice.application.port.out.LoadPaymentPort;
 import com.mv.paymentservice.application.port.out.SaveOutboxEventPort;
 import com.mv.paymentservice.application.port.out.SavePaymentPort;
@@ -22,6 +23,7 @@ public class ProcessPaymentCallbackService implements ProcessPaymentCallbackUseC
     private final LoadPaymentPort loadPaymentPort;
     private final SavePaymentPort savePaymentPort;
     private final SaveOutboxEventPort saveOutboxEventPort;
+    private final BookingConfirmationPort bookingConfirmationPort;
 
     @Override
     @Transactional
@@ -40,6 +42,12 @@ public class ProcessPaymentCallbackService implements ProcessPaymentCallbackUseC
                     savedPayment.getProviderTransactionId()
             );
             saveOutboxEventPort.save(savedPayment.getId(), "PaymentSucceeded", payload);
+            bookingConfirmationPort.confirmPaymentSucceeded(
+                    savedPayment.getBookingId(),
+                    savedPayment.getId(),
+                    savedPayment.getAmount(),
+                    savedPayment.getCurrency()
+            );
             log.info("Payment {} marked as SUCCESS", savedPayment.getId());
             return savedPayment;
         } else {
