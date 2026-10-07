@@ -57,4 +57,9 @@ public class ShowtimeSeatRepositoryAdapter implements ShowtimeSeatRepository, Sh
     public Optional<ShowtimeSeat> findById(UUID id) {
         return showtimeSeatJpaRepository.findById(id).map(mapper::toDomain);
     }
+
+    @Override
+    public boolean existsByShowtimeId(UUID showtimeId) {
+        return showtimeSeatJpaRepository.existsByShowtimeId(showtimeId);
+    }
 }
