@@ -11,4 +11,6 @@ public interface ShowtimeSeatRepositoryPort {
     List<ShowtimeSeat> findByHoldId(UUID holdId);
 
     List<ShowtimeSeat> saveAll(List<ShowtimeSeat> seats);
+
+    boolean existsByShowtimeId(UUID showtimeId);
 }
