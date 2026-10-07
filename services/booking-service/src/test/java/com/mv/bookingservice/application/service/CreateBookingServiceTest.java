@@ -8,6 +8,7 @@ import com.mv.bookingservice.application.port.out.ShowtimeClientPort;
 import com.mv.bookingservice.application.port.out.UserClientPort;
 import com.mv.bookingservice.domain.model.booking.aggregate.Booking;
 import com.mv.bookingservice.domain.model.booking.exception.BookingConflictException;
+import com.mv.bookingservice.domain.model.booking.exception.BookingValidationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -95,6 +96,79 @@ class CreateBookingServiceTest {
         assertEquals("idem-key-1", result.getIdempotencyKey());
         assertEquals(holdId, result.getHoldId());
         verify(saveBookingPort, times(1)).save(any(Booking.class));
+    }
+
+    @Test
+    void shouldValidateUserBeforeHoldingSeats() {
+        UUID userId = UUID.randomUUID();
+
+        CreateBookingCommand command = CreateBookingCommand.builder()
+                .userId(userId)
+                .idempotencyKey("idem-key-1")
+                .requestHash("hash-1")
+                .build();
+
+        when(loadBookingPort.findByUserIdAndIdempotencyKey(userId, "idem-key-1")).thenReturn(Optional.empty());
+        when(userClientPort.validateUser(userId)).thenReturn(new UserClientPort.UserValidationResult(userId, "u@example.com", "User", "BLOCKED"));
+
+        assertThrows(BookingValidationException.class, () -> createBookingService.execute(command));
+
+        verify(showtimeClientPort, never()).holdSeats(any(), any(), any(), any());
+        verify(saveBookingPort, never()).save(any());
+    }
+
+    @Test
+    void shouldRequireIdempotencyKeyBeforeCallingUserOrShowtime() {
+        CreateBookingCommand command = CreateBookingCommand.builder()
+                .userId(UUID.randomUUID())
+                .build();
+
+        assertThrows(BookingValidationException.class, () -> createBookingService.execute(command));
+
+        verify(userClientPort, never()).validateUser(any());
+        verify(showtimeClientPort, never()).holdSeats(any(), any(), any(), any());
+        verify(saveBookingPort, never()).save(any());
+    }
+
+    @Test
+    void shouldReleaseHoldWhenSavingBookingFails() {
+        UUID userId = UUID.randomUUID();
+        UUID showtimeId = UUID.randomUUID();
+        UUID holdId = UUID.randomUUID();
+        UUID seatId = UUID.randomUUID();
+        UUID showtimeSeatId = UUID.randomUUID();
+
+        CreateBookingSeatCommand seatCmd = CreateBookingSeatCommand.builder()
+                .showtimeSeatId(showtimeSeatId)
+                .build();
+
+        CreateBookingCommand command = CreateBookingCommand.builder()
+                .userId(userId)
+                .showtimeId(showtimeId)
+                .idempotencyKey("idem-key-1")
+                .requestHash("hash-1")
+                .currency("VND")
+                .discountAmount(BigDecimal.ZERO)
+                .seats(List.of(seatCmd))
+                .build();
+
+        when(loadBookingPort.findByUserIdAndIdempotencyKey(userId, "idem-key-1")).thenReturn(Optional.empty());
+        when(userClientPort.validateUser(userId)).thenReturn(new UserClientPort.UserValidationResult(userId, "u@example.com", "User", "ACTIVE"));
+        when(showtimeClientPort.holdSeats(eq(showtimeId), any(UUID.class), eq(List.of(showtimeSeatId)), eq("idem-key-1")))
+                .thenReturn(new ShowtimeClientPort.SeatHoldResult(
+                        holdId,
+                        Instant.now().plusSeconds(600),
+                        "Movie 1",
+                        "Cinema 1",
+                        "Screen 1",
+                        Instant.now().plusSeconds(3600),
+                        List.of(new ShowtimeClientPort.HeldSeatDetail(showtimeSeatId, seatId, "A1", new BigDecimal("100000.00")))
+                ));
+        when(saveBookingPort.save(any(Booking.class))).thenThrow(new IllegalStateException("db failure"));
+
+        assertThrows(IllegalStateException.class, () -> createBookingService.execute(command));
+
+        verify(showtimeClientPort).releaseHold(holdId);
     }
 
     @Test

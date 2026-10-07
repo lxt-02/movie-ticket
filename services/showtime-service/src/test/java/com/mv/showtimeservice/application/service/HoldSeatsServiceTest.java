@@ -10,6 +10,8 @@ import com.mv.showtimeservice.domain.model.seathold.aggregate.SeatHold;
 import com.mv.showtimeservice.domain.model.showtime.aggregate.Showtime;
 import com.mv.showtimeservice.domain.model.showtime.entity.ShowtimeSeat;
 import com.mv.showtimeservice.domain.model.seathold.enums.SeatHoldStatus;
+import com.mv.showtimeservice.domain.model.seathold.exception.SeatHoldConflictException;
+import com.mv.showtimeservice.domain.model.seathold.exception.SeatUnavailableException;
 import com.mv.showtimeservice.domain.model.showtime.enums.ShowtimeSeatStatus;
 import com.mv.showtimeservice.domain.model.showtime.enums.ShowtimeStatus;
 import org.junit.jupiter.api.BeforeEach;
@@ -102,5 +104,123 @@ class HoldSeatsServiceTest {
         assertEquals(bookingId, result.getSeatHold().getBookingId());
         assertEquals(1, result.getSeats().size());
         assertEquals(ShowtimeSeatStatus.HELD, result.getSeats().get(0).getStatus());
+    }
+
+    @Test
+    void shouldReturnExistingHoldOnIdempotentRetryWithSameHash() {
+        UUID showtimeId = UUID.randomUUID();
+        UUID bookingId = UUID.randomUUID();
+        UUID holdId = UUID.randomUUID();
+        UUID showtimeSeatId = UUID.randomUUID();
+
+        SeatHold existingHold = SeatHold.builder()
+                .id(holdId)
+                .bookingId(bookingId)
+                .showtimeId(showtimeId)
+                .idempotencyKey("key-1")
+                .requestHash("hash-1")
+                .status(SeatHoldStatus.HELD)
+                .expiresAt(Instant.now().plusSeconds(600))
+                .build();
+        Showtime showtime = Showtime.builder()
+                .id(showtimeId)
+                .movieTitle("Avatar 2")
+                .cinemaName("Cinema 1")
+                .screenName("Screen 1")
+                .startTime(Instant.now().plusSeconds(3600))
+                .status(ShowtimeStatus.SELLING)
+                .build();
+        ShowtimeSeat heldSeat = ShowtimeSeat.builder()
+                .id(showtimeSeatId)
+                .showtimeId(showtimeId)
+                .status(ShowtimeSeatStatus.HELD)
+                .holdId(holdId)
+                .build();
+        HoldSeatsCommand command = HoldSeatsCommand.builder()
+                .showtimeId(showtimeId)
+                .bookingId(bookingId)
+                .showtimeSeatIds(List.of(showtimeSeatId))
+                .idempotencyKey("key-1")
+                .requestHash("hash-1")
+                .holdDurationSeconds(600)
+                .build();
+
+        when(loadSeatHoldPort.findByIdempotencyKey("key-1")).thenReturn(Optional.of(existingHold));
+        when(showtimeRepositoryPort.findById(showtimeId)).thenReturn(Optional.of(showtime));
+        when(showtimeSeatRepositoryPort.findByHoldId(holdId)).thenReturn(List.of(heldSeat));
+
+        HoldSeatsResult result = holdSeatsService.execute(command);
+
+        assertEquals(existingHold, result.getSeatHold());
+        assertEquals(List.of(heldSeat), result.getSeats());
+        verify(saveSeatHoldPort, never()).save(any());
+        verify(showtimeSeatRepositoryPort, never()).saveAll(anyList());
+    }
+
+    @Test
+    void shouldRejectIdempotencyKeyReusedWithDifferentHash() {
+        SeatHold existingHold = SeatHold.builder()
+                .id(UUID.randomUUID())
+                .bookingId(UUID.randomUUID())
+                .showtimeId(UUID.randomUUID())
+                .idempotencyKey("key-1")
+                .requestHash("hash-1")
+                .status(SeatHoldStatus.HELD)
+                .expiresAt(Instant.now().plusSeconds(600))
+                .build();
+        HoldSeatsCommand command = HoldSeatsCommand.builder()
+                .showtimeId(UUID.randomUUID())
+                .bookingId(UUID.randomUUID())
+                .showtimeSeatIds(List.of(UUID.randomUUID()))
+                .idempotencyKey("key-1")
+                .requestHash("different-hash")
+                .holdDurationSeconds(600)
+                .build();
+
+        when(loadSeatHoldPort.findByIdempotencyKey("key-1")).thenReturn(Optional.of(existingHold));
+
+        assertThrows(SeatHoldConflictException.class, () -> holdSeatsService.execute(command));
+
+        verify(showtimeRepositoryPort, never()).findByIdWithLock(any());
+        verify(saveSeatHoldPort, never()).save(any());
+    }
+
+    @Test
+    void shouldRejectSeatsThatDoNotBelongToShowtime() {
+        UUID requestedShowtimeId = UUID.randomUUID();
+        UUID otherShowtimeId = UUID.randomUUID();
+        UUID bookingId = UUID.randomUUID();
+        UUID seatId = UUID.randomUUID();
+
+        Showtime showtime = Showtime.builder()
+                .id(requestedShowtimeId)
+                .startTime(Instant.now().plusSeconds(3600))
+                .status(ShowtimeStatus.SELLING)
+                .build();
+        ShowtimeSeat seat = ShowtimeSeat.builder()
+                .id(seatId)
+                .showtimeId(otherShowtimeId)
+                .seatLabel("A1")
+                .price(new BigDecimal("100000.00"))
+                .status(ShowtimeSeatStatus.AVAILABLE)
+                .build();
+        HoldSeatsCommand command = HoldSeatsCommand.builder()
+                .showtimeId(requestedShowtimeId)
+                .bookingId(bookingId)
+                .showtimeSeatIds(List.of(seatId))
+                .idempotencyKey("key-1")
+                .requestHash("hash-1")
+                .holdDurationSeconds(600)
+                .build();
+
+        when(loadSeatHoldPort.findByIdempotencyKey("key-1")).thenReturn(Optional.empty());
+        when(loadSeatHoldPort.findByBookingId(bookingId)).thenReturn(Optional.empty());
+        when(showtimeRepositoryPort.findByIdWithLock(requestedShowtimeId)).thenReturn(Optional.of(showtime));
+        when(showtimeSeatRepositoryPort.findByIdsWithLock(anyList())).thenReturn(List.of(seat));
+
+        assertThrows(SeatUnavailableException.class, () -> holdSeatsService.execute(command));
+
+        verify(saveSeatHoldPort, never()).save(any());
+        verify(showtimeSeatRepositoryPort, never()).saveAll(anyList());
     }
 }

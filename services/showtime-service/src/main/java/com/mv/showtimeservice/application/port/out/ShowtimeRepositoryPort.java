@@ -9,4 +9,6 @@ public interface ShowtimeRepositoryPort {
     Optional<Showtime> findById(UUID id);
 
     Optional<Showtime> findByIdWithLock(UUID id);
+
+    Showtime save(Showtime showtime);
 }

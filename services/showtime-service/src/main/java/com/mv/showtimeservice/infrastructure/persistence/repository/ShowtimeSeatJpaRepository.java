@@ -18,6 +18,8 @@ public interface ShowtimeSeatJpaRepository extends JpaRepository<ShowtimeSeatEnt
 
     List<ShowtimeSeatEntity> findByHoldId(UUID holdId);
 
+    boolean existsByShowtimeId(UUID showtimeId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT s FROM ShowtimeSeatEntity s WHERE s.id IN :ids ORDER BY s.id ASC")
     List<ShowtimeSeatEntity> findByIdsWithLock(@Param("ids") List<UUID> ids);
