@@ -10,3 +10,7 @@ spring:
     database-platform: org.hibernate.dialect.H2Dialect
   flyway:
     enabled: false
+
+eureka:
+  client:
+    enabled: false
