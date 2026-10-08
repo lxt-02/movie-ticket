@@ -1,3 +1,65 @@
 spring:
   application:
     name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webflux:
+          routes:
+            - id: user-service
+              uri: lb://user-service
+              predicates:
+                - Path=/internal/users/**
+            - id: showtime-public-service
+              uri: lb://showtime-service
+              predicates:
+                - Path=/api/v1/showtimes,/api/v1/showtimes/**
+            - id: showtime-internal-service
+              uri: lb://showtime-service
+              predicates:
+                - Path=/internal/showtimes/**,/internal/holds/**
+            - id: booking-public-service
+              uri: lb://booking-service
+              predicates:
+                - Path=/api/v1/bookings,/api/v1/bookings/**
+            - id: booking-internal-service
+              uri: lb://booking-service
+              predicates:
+                - Path=/internal/bookings/**
+            - id: payment-public-service
+              uri: lb://payment-service
+              predicates:
+                - Path=/api/v1/payments,/api/v1/payments/**
+            - id: payment-internal-service
+              uri: lb://payment-service
+              predicates:
+                - Path=/internal/payments/**
+            - id: cinema-service-cinemas
+              uri: lb://cinema-service
+              predicates:
+                - Path=/internal/cinemas/**
+            - id: cinema-service-screens
+              uri: lb://cinema-service
+              predicates:
+                - Path=/internal/screens/**
+            - id: movie-service
+              uri: lb://movie-service
+              predicates:
+                - Path=/internal/movies/**
+
+server:
+  port: 8080
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE:http://localhost:8761/eureka/}
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.application.name}:${server.port}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway
