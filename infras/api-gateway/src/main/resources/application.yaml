@@ -5,7 +5,18 @@ spring:
     gateway:
       server:
         webflux:
+          default-filters:
+            - name: RequestRateLimiter
+              args:
+                rate-limiter: "#{@defaultRedisRateLimiter}"
+                key-resolver: "#{@userKeyResolver}"
+                deny-empty-key: true
+                empty-key-status: UNAUTHORIZED
           routes:
+            - id: rate-limit-ping
+              uri: forward:/internal/gateway/ping
+              predicates:
+                - Path=/rate-limit/ping
             - id: user-service
               uri: lb://user-service
               predicates:
@@ -46,6 +57,17 @@ spring:
               uri: lb://movie-service
               predicates:
                 - Path=/internal/movies/**
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+app:
+  rate-limit:
+    default:
+      replenish-rate: ${RATE_LIMIT_REPLENISH_RATE:1}
+      burst-capacity: ${RATE_LIMIT_BURST_CAPACITY:2}
+      requested-tokens: ${RATE_LIMIT_REQUESTED_TOKENS:1}
 
 server:
   port: 8080
