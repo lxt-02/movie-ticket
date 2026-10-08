@@ -66,7 +66,7 @@ app:
   rate-limit:
     default:
       replenish-rate: ${RATE_LIMIT_REPLENISH_RATE:1}
-      burst-capacity: ${RATE_LIMIT_BURST_CAPACITY:2}
+      burst-capacity: ${RATE_LIMIT_BURST_CAPACITY:1}
       requested-tokens: ${RATE_LIMIT_REQUESTED_TOKENS:1}
 
 server:
