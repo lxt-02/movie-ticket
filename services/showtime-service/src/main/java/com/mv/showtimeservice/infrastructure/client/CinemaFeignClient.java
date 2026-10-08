@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 
 import java.util.UUID;
 
-@FeignClient(name = "cinema-service", url = "${clients.cinema.base-url:http://localhost:8084}")
+@FeignClient(name = "cinema-service", url = "${clients.cinema.base-url:}")
 public interface CinemaFeignClient {
 
     @GetMapping("/internal/cinemas/{id}")

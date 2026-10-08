@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 
 import java.util.UUID;
 
-@FeignClient(name = "showtime-service", url = "${clients.showtime.base-url:http://localhost:8082}")
+@FeignClient(name = "showtime-service", url = "${clients.showtime.base-url:}")
 public interface ShowtimeFeignClient {
 
     @PostMapping("/internal/showtimes/{id}/holds")
