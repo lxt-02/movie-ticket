@@ -50,6 +50,7 @@ Khi dùng rewrites thì để base URL rỗng và gọi đường dẫn tương 
 |---|---|---|
 | `X-User-Id` | Có, với mọi API `/api/v1/bookings/**` và `/api/v1/payments/**` | UUID của user đang đăng nhập. **Chưa có login/JWT**, FE tạm lưu userId (ví dụ chọn user demo) và gửi header này. Thiếu header → `401`. |
 | `Idempotency-Key` | Có, với `POST /api/v1/bookings` | Chuỗi ngẫu nhiên (khuyên dùng `crypto.randomUUID()`), sinh **một lần cho mỗi lần bấm "Đặt vé"**. Nếu request lỗi mạng và gửi lại, **dùng lại cùng key** để không tạo trùng booking. |
+| `X-User-Role` | Có, với API **ghi** của movie / cinema / showtime (POST, PUT, PATCH, DELETE) | Giá trị `ADMIN` cho trang quản trị. Thiếu hoặc khác `ADMIN` → `403`. Với GET: gửi `ADMIN` để thấy cả phim `ARCHIVED`, rạp `CLOSED`, suất đã huỷ / đã chiếu. **Tạm thời cho dev**, sau này lấy từ JWT. |
 | `Content-Type: application/json` | Với request có body | |
 
 User demo có sẵn (xem mục 3): `10000000-0000-0000-0000-000000000001`.
@@ -127,11 +128,20 @@ FE hiển thị `message` cho người dùng; nếu có `errors` thì hiển th�
 
 | # | Method | Path | Mô tả |
 |---|---|---|---|
-| 4.1.1 | GET | `/internal/movies/{id}` | Chi tiết phim |
-| 4.2.1 | GET | `/internal/cinemas/{id}` | Chi tiết rạp |
-| 4.2.2 | GET | `/internal/screens/{id}` | Chi tiết phòng chiếu |
-| 4.2.3 | GET | `/internal/screens/{id}/layout` | Sơ đồ ghế vật lý của phòng |
-| 4.3.1 | POST | `/api/v1/showtimes` | Tạo suất chiếu (trang admin) |
+| 4.7.1 | GET | `/api/v1/movies` | **Danh sách phim** (lọc, tìm kiếm, phân trang) |
+| 4.7.1 | GET | `/api/v1/movies/{id}` | Chi tiết phim |
+| 4.7.1 | POST / PUT / PATCH / DELETE | `/api/v1/movies...` | Quản lý phim (admin) |
+| 4.7.2 | GET | `/api/v1/cinemas` | **Danh sách rạp** |
+| 4.7.2 | GET | `/api/v1/cinemas/{id}` · `/api/v1/cinemas/{id}/screens` | Chi tiết rạp · phòng chiếu của rạp |
+| 4.7.2 | POST / PUT / PATCH / DELETE | `/api/v1/cinemas...` | Quản lý rạp (admin) |
+| 4.7.3 | GET | `/api/v1/showtimes` | **Lịch chiếu** theo phim / rạp / phòng / ngày |
+| 4.7.3 | GET | `/api/v1/showtimes/{id}` · `/api/v1/showtimes/{id}/seats` | Chi tiết suất · **sơ đồ ghế theo suất** (có `showtimeSeatId`, giá, trạng thái) |
+| 4.3.1 | POST | `/api/v1/showtimes` | Tạo suất chiếu (admin, nay **cần `X-User-Role: ADMIN`**) |
+| 4.7.3 | PUT / DELETE | `/api/v1/showtimes/{id}` | Đổi giờ / giá, huỷ suất (admin) |
+| 4.1.1 | GET | `/internal/movies/{id}` | *(deprecated, dùng 4.7.1)* Chi tiết phim |
+| 4.2.1 | GET | `/internal/cinemas/{id}` | *(deprecated, dùng 4.7.2)* Chi tiết rạp |
+| 4.2.2 | GET | `/internal/screens/{id}` | *(deprecated)* Chi tiết phòng chiếu |
+| 4.2.3 | GET | `/internal/screens/{id}/layout` | *(deprecated, dùng `/api/v1/showtimes/{id}/seats`)* Sơ đồ ghế vật lý |
 | 4.4.1 | POST | `/api/v1/bookings` | Đặt vé (giữ ghế + tạo booking) |
 | 4.4.2 | GET | `/api/v1/bookings` | Danh sách booking của tôi |
 | 4.4.3 | GET | `/api/v1/bookings/{id}` | Chi tiết booking |
@@ -144,8 +154,8 @@ FE hiển thị `message` cho người dùng; nếu có `errors` thì hiển th�
 | 4.5.4 | POST | `/api/v1/payments/{id}/sync` | Hỏi PayOS và cập nhật một payment |
 | 4.6.x | GET | `/rate-limit/{user\|ip\|api-key}/ping` | Demo rate limit (không phải nghiệp vụ) |
 
-> `/internal/movies`, `/internal/cinemas`, `/internal/screens` là API nội bộ, Gateway chỉ cho **GET** tạm thời
-> cho đến khi có API public `/api/v1/...`. FE chỉ dùng để đọc.
+> `/internal/movies`, `/internal/cinemas`, `/internal/screens` là API nội bộ, Gateway còn cho **GET** tạm thời để FE cũ
+> không hỏng. **FE mới hãy dùng API public ở mục 4.7**; các route `/internal` sẽ bị bỏ khỏi Gateway.
 
 ---
 
@@ -697,6 +707,81 @@ Các route có load balancer (`/api/v1/**`) trả thêm header `X-Served-By` = i
 
 ---
 
+### 4.7 Catalogue: phim, rạp, suất chiếu (API public mới)
+
+Quy ước chung:
+- GET không cần header. API ghi cần `X-User-Role: ADMIN` (thiếu → `403`).
+- Danh sách có phân trang: `?page=0&size=20` (size tối đa 100). `data` có dạng:
+  ```json
+  { "items": [ ... ], "page": 0, "size": 20, "totalElements": 42, "totalPages": 3 }
+  ```
+- **Xoá là xoá mềm**: phim → `ARCHIVED`, rạp → `CLOSED`, suất → `CANCELLED`. Người thường không thấy phim `ARCHIVED` và rạp `CLOSED` (chi tiết trả `404`).
+
+#### 4.7.1 Movie
+
+| Method | Path | Ghi chú |
+|---|---|---|
+| GET | `/api/v1/movies?status=NOW_SHOWING&q=dune&page=0&size=20` | `status` và `q` (tìm theo tên) không bắt buộc |
+| GET | `/api/v1/movies/{id}` | Trả `MovieResponse` như 4.1.1 |
+| POST | `/api/v1/movies` | Body `MovieRequest` → `201` |
+| PUT | `/api/v1/movies/{id}` | Body `MovieRequest`, **thay toàn bộ** (gửi đủ field) |
+| PATCH | `/api/v1/movies/{id}/status` | `{ "status": "NOW_SHOWING" }` |
+| DELETE | `/api/v1/movies/{id}` | Lưu trữ phim (`ARCHIVED`) |
+
+```json
+// MovieRequest
+{ "title": "Dune: Part Three", "originalTitle": null, "description": "...", "durationMinutes": 165,
+  "releaseDate": "2026-12-18", "ageRating": "T13", "language": "en", "country": "US",
+  "posterUrl": "https://...", "status": "COMING_SOON" }
+```
+- Bắt buộc: `title`, `durationMinutes` (1–600). `status` chỉ dùng khi tạo: `COMING_SOON` (mặc định) hoặc `NOW_SHOWING`.
+- Đổi trạng thái hợp lệ: `COMING_SOON → NOW_SHOWING ⇄ ENDED`, trạng thái nào cũng có thể sang `ARCHIVED`. Phim `ARCHIVED` không sửa được (`400`).
+- Chỉ phim `NOW_SHOWING` mới tạo được suất chiếu.
+
+#### 4.7.2 Cinema
+
+| Method | Path | Ghi chú |
+|---|---|---|
+| GET | `/api/v1/cinemas?city=Ho Chi Minh&q=cgv&page=0&size=20` | `city`, `status`, `q` không bắt buộc |
+| GET | `/api/v1/cinemas/{id}` | Trả `CinemaResponse` như 4.2.1 |
+| GET | `/api/v1/cinemas/{id}/screens` | Mảng `ScreenResponse` như 4.2.2 |
+| POST | `/api/v1/cinemas` | Body `CinemaRequest` → `201` |
+| PUT | `/api/v1/cinemas/{id}` | Thay toàn bộ |
+| PATCH | `/api/v1/cinemas/{id}/status` | `{ "status": "INACTIVE" }` |
+| DELETE | `/api/v1/cinemas/{id}` | Đóng rạp (`CLOSED`, không mở lại được) |
+
+```json
+// CinemaRequest
+{ "name": "CGV Landmark 81", "brand": "CGV", "address": "720A Dien Bien Phu", "city": "Ho Chi Minh",
+  "district": "Binh Thanh", "phone": "1900 6017", "status": "ACTIVE" }
+```
+- Bắt buộc: `name`, `address`, `city`. `ACTIVE ⇄ INACTIVE`; `CLOSED` là trạng thái cuối. Chỉ rạp `ACTIVE` nhận suất chiếu mới.
+
+#### 4.7.3 Showtime
+
+| Method | Path | Ghi chú |
+|---|---|---|
+| GET | `/api/v1/showtimes?movieId=&cinemaId=&screenId=&date=2026-10-25&page=0&size=20` | Sắp xếp theo giờ chiếu. `date` = một ngày theo **giờ Việt Nam**; có thể dùng `from` / `to` (ISO) thay cho `date` |
+| GET | `/api/v1/showtimes/{id}` | `ShowtimeResponse` như 4.3.1 |
+| GET | `/api/v1/showtimes/{id}/seats` | **Sơ đồ ghế của suất** (xem dưới) |
+| PUT | `/api/v1/showtimes/{id}` | `{ "startTime": "2026-10-25T15:00:00Z", "basePrice": 80000 }`, gửi 1 hoặc cả 2 field |
+| DELETE | `/api/v1/showtimes/{id}` | Huỷ suất (`CANCELLED`, mọi ghế `BLOCKED`) |
+
+```json
+// GET /api/v1/showtimes/{id}/seats → data
+[ { "showtimeSeatId": "51000000-0000-0000-0000-000000000003", "seatId": "...", "seatLabel": "A3",
+    "seatType": "STANDARD", "price": 100000.00, "status": "AVAILABLE" } ]
+```
+- Dùng `showtimeSeatId` khi đặt vé (4.4.1). `status`: `AVAILABLE` / `HELD` / `BOOKED` / `BLOCKED`; chỉ cho chọn ghế `AVAILABLE`.
+- Người thường chỉ thấy suất `SCHEDULED` / `SELLING` **chưa chiếu**. Admin gửi thêm `status=CANCELLED&status=ENDED` để xem các suất khác.
+- Quy tắc admin:
+  - Một phòng không được có 2 suất chồng giờ (cách nhau tối thiểu 15 phút dọn phòng) → `409`.
+  - Suất đã có người giữ hoặc mua ghế thì **không sửa / huỷ được** → `409`.
+  - Chỉ sửa được suất chưa bắt đầu.
+  - Đổi giá thì giá các ghế đổi theo tỉ lệ (ghế VIP vẫn gấp 1,5 lần).
+
+---
+
 ## 5. Luồng đặt vé và thanh toán (FE cần làm đúng thứ tự)
 
 ```
@@ -732,9 +817,8 @@ Trang **"Vé của tôi"**: `GET /api/v1/bookings`, nhóm theo `status`. Booking
 | Chức năng | Tình trạng | Gợi ý cho FE |
 |---|---|---|
 | Đăng nhập / đăng ký / JWT | Chưa có | Màn hình chọn user demo, lưu `userId` vào `localStorage` và gửi `X-User-Id` |
-| Danh sách phim | Chưa có (chỉ có chi tiết theo id) | Mock danh sách 3 movieId ở mục 3, gọi 4.1.1 lấy chi tiết |
-| Danh sách rạp, danh sách suất chiếu theo phim/rạp/ngày | Chưa có | Mock 2 suất ở mục 3 |
-| **Sơ đồ ghế theo suất chiếu** (`showtimeSeatId` + trống/đã giữ) | Chưa có | Vẽ sơ đồ từ 4.2.3 hoặc mock, map `label` → `showtimeSeatId` bằng bảng ở mục 3. Trạng thái ghế lấy từ seed; ghế đã bị giữ sẽ được phát hiện khi đặt (`409`) |
+| Danh sách phim, rạp, lịch chiếu, sơ đồ ghế theo suất | **Đã có** (mục 4.7) | Bỏ mock, gọi API 4.7 |
+| CRUD phòng chiếu / sơ đồ ghế vật lý | Chưa có | Chỉ đọc được qua `/api/v1/cinemas/{id}/screens` |
 | Thông tin user (profile) | Chỉ có API nội bộ, chưa qua Gateway | Mock theo bảng user demo |
 
 FE nên tách lớp gọi API (ví dụ `src/api/*.ts`) để khi backend bổ sung các API trên chỉ cần thay phần mock.
