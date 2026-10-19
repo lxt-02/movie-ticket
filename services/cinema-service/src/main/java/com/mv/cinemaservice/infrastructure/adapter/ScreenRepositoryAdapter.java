@@ -29,6 +29,14 @@ public class ScreenRepositoryAdapter implements ScreenRepository, LoadScreenPort
     }
 
     @Override
+    public java.util.List<Screen> findByCinemaId(UUID cinemaId) {
+        return screenJpaRepository.findByCinemaId(cinemaId).stream()
+                .map(mapper::toDomain)
+                .sorted(java.util.Comparator.comparing(Screen::getName))
+                .toList();
+    }
+
+    @Override
     public Screen save(Screen screen) {
         CinemaEntity cinemaEntity = cinemaJpaRepository.findById(screen.getCinemaId()).orElse(null);
         ScreenTypeEntity screenTypeEntity = screen.getScreenTypeId() != null
