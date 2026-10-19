@@ -2,13 +2,20 @@ package com.mv.cinemaservice.api.exception;
 
 import com.mv.cinemaservice.domain.model.cinema.exception.CinemaNotFoundException;
 import com.mv.cinemaservice.domain.model.screen.exception.ScreenNotFoundException;
+import com.mv.cinemaservice.api.security.ForbiddenException;
+import com.mv.cinemaservice.domain.model.cinema.exception.InvalidCinemaException;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -24,6 +31,43 @@ public class GlobalExceptionHandler {
                 .timestamp(Instant.now())
                 .build();
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+    }
+
+    @ExceptionHandler(ForbiddenException.class)
+    public ResponseEntity<ErrorResponse> handleForbidden(ForbiddenException ex, HttpServletRequest request) {
+        return error(HttpStatus.FORBIDDEN, ex.getMessage(), request, null);
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex, HttpServletRequest request) {
+        Map<String, String> errors = new HashMap<>();
+        ex.getBindingResult().getFieldErrors().forEach(e -> errors.put(e.getField(), e.getDefaultMessage()));
+        return error(HttpStatus.BAD_REQUEST, "Validation failed", request, errors);
+    }
+
+    /** Malformed JSON, unknown enum value, wrong type in a query parameter. */
+    @ExceptionHandler({HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class})
+    public ResponseEntity<ErrorResponse> handleUnreadable(Exception ex, HttpServletRequest request) {
+        return error(HttpStatus.BAD_REQUEST, "Malformed request: " + ex.getMessage(), request, null);
+    }
+
+    @ExceptionHandler(InvalidCinemaException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidCinema(InvalidCinemaException ex, HttpServletRequest request) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), request, null);
+    }
+
+    private ResponseEntity<ErrorResponse> error(HttpStatus status, String message, HttpServletRequest request,
+                                                Map<String, String> errors) {
+        ErrorResponse response = ErrorResponse.builder()
+                .success(false)
+                .status(status.value())
+                .error(status.getReasonPhrase())
+                .message(message)
+                .path(request.getRequestURI())
+                .errors(errors)
+                .timestamp(Instant.now())
+                .build();
+        return ResponseEntity.status(status).body(response);
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
