@@ -5,18 +5,51 @@ spring:
     gateway:
       server:
         webflux:
-          default-filters:
-            - name: RequestRateLimiter
-              args:
-                rate-limiter: "#{@defaultRedisRateLimiter}"
-                key-resolver: "#{@userKeyResolver}"
-                deny-empty-key: true
-                empty-key-status: UNAUTHORIZED
           routes:
-            - id: rate-limit-ping
+            # --- Rate-limit demo routes (all forward to PingController) ---
+            # Each route picks its own KeyResolver + RedisRateLimiter by bean name.
+            # Redis key: rl:{user|ip|apikey}:{identity}:{routeId}
+
+            # 1) Per user: X-User-Id (dev/demo) -> missing header = 401
+            - id: rate-limit-user-ping
               uri: forward:/internal/gateway/ping
               predicates:
-                - Path=/rate-limit/ping
+                - Path=/rate-limit/user/ping
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    rate-limiter: "#{@userRateLimiter}"
+                    key-resolver: "#{@userKeyResolver}"
+                    deny-empty-key: true
+                    empty-key-status: UNAUTHORIZED
+
+            # 2) Per client IP (anonymous callers)
+            - id: rate-limit-ip-ping
+              uri: forward:/internal/gateway/ping
+              predicates:
+                - Path=/rate-limit/ip/ping
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    rate-limiter: "#{@ipRateLimiter}"
+                    key-resolver: "#{@ipKeyResolver}"
+                    deny-empty-key: true
+                    empty-key-status: UNAUTHORIZED
+
+            # 3) Per API key: X-Api-Key -> missing header = 401
+            - id: rate-limit-apikey-ping
+              uri: forward:/internal/gateway/ping
+              predicates:
+                - Path=/rate-limit/api-key/ping
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    rate-limiter: "#{@apiKeyRateLimiter}"
+                    key-resolver: "#{@apiKeyResolver}"
+                    deny-empty-key: true
+                    empty-key-status: UNAUTHORIZED
+
+            # --- Service routes (no rate limit) ---
             - id: user-service
               uri: lb://user-service
               predicates:
@@ -61,13 +94,32 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      # If Redis is down, the limiter fails open (request allowed, X-RateLimit-Remaining: -1)
+      # after this timeout instead of hanging.
+      timeout: ${REDIS_TIMEOUT:2s}
 
 app:
   rate-limit:
-    default:
-      replenish-rate: ${RATE_LIMIT_REPLENISH_RATE:1}
-      burst-capacity: ${RATE_LIMIT_BURST_CAPACITY:1}
-      requested-tokens: ${RATE_LIMIT_REQUESTED_TOKENS:1}
+    # DEV/DEMO ONLY: trust X-User-Id as caller identity (no login yet).
+    # Set to false in production; the user ID must come from a validated JWT.
+    trust-user-id-header: ${RATE_LIMIT_TRUST_USER_ID_HEADER:true}
+    # Number of load balancers / reverse proxies in front of the Gateway.
+    # 0 = exposed directly (use TCP remote address). Set to 1 when running behind one LB (e.g. nginx).
+    trusted-proxy-hops: ${RATE_LIMIT_TRUSTED_PROXY_HOPS:0}
+    # Token Bucket policies: replenish-rate = tokens/second, burst-capacity = bucket size,
+    # requested-tokens = tokens consumed per request.
+    user:
+      replenish-rate: ${RATE_LIMIT_USER_REPLENISH_RATE:1}
+      burst-capacity: ${RATE_LIMIT_USER_BURST_CAPACITY:3}
+      requested-tokens: ${RATE_LIMIT_USER_REQUESTED_TOKENS:1}
+    ip:
+      replenish-rate: ${RATE_LIMIT_IP_REPLENISH_RATE:1}
+      burst-capacity: ${RATE_LIMIT_IP_BURST_CAPACITY:5}
+      requested-tokens: ${RATE_LIMIT_IP_REQUESTED_TOKENS:1}
+    api-key:
+      replenish-rate: ${RATE_LIMIT_API_KEY_REPLENISH_RATE:2}
+      burst-capacity: ${RATE_LIMIT_API_KEY_BURST_CAPACITY:5}
+      requested-tokens: ${RATE_LIMIT_API_KEY_REQUESTED_TOKENS:1}
 
 server:
   port: 8080
