@@ -23,7 +23,6 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -47,10 +46,10 @@ public class InternalShowtimeController {
     @PostMapping("/showtimes/{id}/holds")
     public ResponseEntity<ApiResponse<SeatHoldResponse>> holdSeats(
             @PathVariable("id") UUID showtimeId,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody HoldSeatsRequest request
     ) {
-        HoldSeatsCommand command = showtimeDtoMapper.toCommand(showtimeId, request, idempotencyKey);
+        // Idempotency is keyed by bookingId (unique per hold); no caller-supplied key is needed.
+        HoldSeatsCommand command = showtimeDtoMapper.toCommand(showtimeId, request);
         HoldSeatsResult result = holdSeatsUseCase.execute(command);
         SeatHoldResponse response = showtimeDtoMapper.toResponse(result);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success("Seats held successfully", response));

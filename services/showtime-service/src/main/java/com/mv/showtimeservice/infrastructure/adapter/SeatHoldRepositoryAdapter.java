@@ -38,7 +38,12 @@ public class SeatHoldRepositoryAdapter implements SeatHoldRepository, SaveSeatHo
     }
 
     @Override
-    public Optional<SeatHold> findByIdempotencyKey(String idempotencyKey) {
-        return seatHoldJpaRepository.findByIdempotencyKey(idempotencyKey).map(mapper::toDomain);
+    public Optional<UUID> findShowtimeIdByHoldId(UUID holdId) {
+        return seatHoldJpaRepository.findShowtimeIdById(holdId);
+    }
+
+    @Override
+    public Optional<SeatHold> findByIdForUpdate(UUID id) {
+        return seatHoldJpaRepository.findByIdForUpdate(id).map(mapper::toDomain);
     }
 }

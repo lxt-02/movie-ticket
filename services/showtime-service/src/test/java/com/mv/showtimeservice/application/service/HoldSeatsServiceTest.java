@@ -90,7 +90,6 @@ class HoldSeatsServiceTest {
                 .holdDurationSeconds(600)
                 .build();
 
-        when(loadSeatHoldPort.findByIdempotencyKey("key-1")).thenReturn(Optional.empty());
         when(loadSeatHoldPort.findByBookingId(bookingId)).thenReturn(Optional.empty());
         when(showtimeRepositoryPort.findByIdWithLock(showtimeId)).thenReturn(Optional.of(showtime));
         when(showtimeSeatRepositoryPort.findByIdsWithLock(anyList())).thenReturn(List.of(seat1));
@@ -145,7 +144,8 @@ class HoldSeatsServiceTest {
                 .holdDurationSeconds(600)
                 .build();
 
-        when(loadSeatHoldPort.findByIdempotencyKey("key-1")).thenReturn(Optional.of(existingHold));
+        when(showtimeRepositoryPort.findByIdWithLock(showtimeId)).thenReturn(Optional.of(showtime));
+        when(loadSeatHoldPort.findByBookingId(bookingId)).thenReturn(Optional.of(existingHold));
         when(showtimeRepositoryPort.findById(showtimeId)).thenReturn(Optional.of(showtime));
         when(showtimeSeatRepositoryPort.findByHoldId(holdId)).thenReturn(List.of(heldSeat));
 
@@ -155,10 +155,11 @@ class HoldSeatsServiceTest {
         assertEquals(List.of(heldSeat), result.getSeats());
         verify(saveSeatHoldPort, never()).save(any());
         verify(showtimeSeatRepositoryPort, never()).saveAll(anyList());
+        verify(showtimeSeatRepositoryPort, never()).findByIdsWithLock(anyList());
     }
 
     @Test
-    void shouldRejectIdempotencyKeyReusedWithDifferentHash() {
+    void shouldRejectSameBookingIdWithDifferentRequestHash() {
         SeatHold existingHold = SeatHold.builder()
                 .id(UUID.randomUUID())
                 .bookingId(UUID.randomUUID())
@@ -168,20 +169,27 @@ class HoldSeatsServiceTest {
                 .status(SeatHoldStatus.HELD)
                 .expiresAt(Instant.now().plusSeconds(600))
                 .build();
+        UUID showtimeId = UUID.randomUUID();
         HoldSeatsCommand command = HoldSeatsCommand.builder()
-                .showtimeId(UUID.randomUUID())
-                .bookingId(UUID.randomUUID())
+                .showtimeId(showtimeId)
+                .bookingId(existingHold.getBookingId())
                 .showtimeSeatIds(List.of(UUID.randomUUID()))
-                .idempotencyKey("key-1")
+                .idempotencyKey("booking:" + existingHold.getBookingId())
                 .requestHash("different-hash")
                 .holdDurationSeconds(600)
                 .build();
+        Showtime showtime = Showtime.builder()
+                .id(showtimeId)
+                .startTime(Instant.now().plusSeconds(3600))
+                .status(ShowtimeStatus.SELLING)
+                .build();
 
-        when(loadSeatHoldPort.findByIdempotencyKey("key-1")).thenReturn(Optional.of(existingHold));
+        when(showtimeRepositoryPort.findByIdWithLock(showtimeId)).thenReturn(Optional.of(showtime));
+        when(loadSeatHoldPort.findByBookingId(existingHold.getBookingId())).thenReturn(Optional.of(existingHold));
 
         assertThrows(SeatHoldConflictException.class, () -> holdSeatsService.execute(command));
 
-        verify(showtimeRepositoryPort, never()).findByIdWithLock(any());
+        verify(showtimeSeatRepositoryPort, never()).findByIdsWithLock(anyList());
         verify(saveSeatHoldPort, never()).save(any());
     }
 
@@ -213,7 +221,6 @@ class HoldSeatsServiceTest {
                 .holdDurationSeconds(600)
                 .build();
 
-        when(loadSeatHoldPort.findByIdempotencyKey("key-1")).thenReturn(Optional.empty());
         when(loadSeatHoldPort.findByBookingId(bookingId)).thenReturn(Optional.empty());
         when(showtimeRepositoryPort.findByIdWithLock(requestedShowtimeId)).thenReturn(Optional.of(showtime));
         when(showtimeSeatRepositoryPort.findByIdsWithLock(anyList())).thenReturn(List.of(seat));

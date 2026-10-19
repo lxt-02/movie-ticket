@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
 @Component
 public class ShowtimeDtoMapper {
 
-    public HoldSeatsCommand toCommand(UUID showtimeId, HoldSeatsRequest request, String idempotencyKey) {
+    public HoldSeatsCommand toCommand(UUID showtimeId, HoldSeatsRequest request) {
         if (request == null) {
             return null;
         }
@@ -32,9 +32,17 @@ public class ShowtimeDtoMapper {
                 .showtimeId(showtimeId)
                 .bookingId(request.getBookingId())
                 .showtimeSeatIds(request.getShowtimeSeatIds())
-                .idempotencyKey(idempotencyKey)
+                .idempotencyKey(holdIdempotencyKey(request.getBookingId()))
                 .requestHash(requestHash)
                 .build();
+    }
+
+    /**
+     * Internal key stored in seat_holds.idempotency_key. Derived from bookingId so it is
+     * unique per booking and never collides across users.
+     */
+    public static String holdIdempotencyKey(UUID bookingId) {
+        return bookingId != null ? "booking:" + bookingId : null;
     }
 
     public SeatHoldResponse toResponse(HoldSeatsResult result) {
