@@ -5,7 +5,12 @@ import com.mv.showtimeservice.domain.model.seathold.exception.SeatHoldConflictEx
 import com.mv.showtimeservice.domain.model.seathold.exception.SeatHoldNotFoundException;
 import com.mv.showtimeservice.domain.model.seathold.exception.SeatUnavailableException;
 import com.mv.showtimeservice.domain.model.showtime.exception.ShowtimeNotFoundException;
+import com.mv.showtimeservice.api.security.ForbiddenException;
+import com.mv.showtimeservice.domain.model.showtime.exception.InvalidShowtimeException;
+import com.mv.showtimeservice.domain.model.showtime.exception.ShowtimeConflictException;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
@@ -33,7 +38,7 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
     }
 
-    @ExceptionHandler({SeatHoldConflictException.class, SeatUnavailableException.class})
+    @ExceptionHandler({SeatHoldConflictException.class, SeatUnavailableException.class, ShowtimeConflictException.class})
     public ResponseEntity<ErrorResponse> handleConflict(Exception ex, HttpServletRequest request) {
         ErrorResponse response = ErrorResponse.builder()
                 .success(false)
@@ -46,7 +51,9 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
     }
 
-    @ExceptionHandler({InvalidSeatHoldStateException.class, IllegalArgumentException.class})
+    @ExceptionHandler({InvalidSeatHoldStateException.class, IllegalArgumentException.class,
+            InvalidShowtimeException.class, HttpMessageNotReadableException.class,
+            MethodArgumentTypeMismatchException.class})
     public ResponseEntity<ErrorResponse> handleBadRequest(Exception ex, HttpServletRequest request) {
         ErrorResponse response = ErrorResponse.builder()
                 .success(false)
@@ -57,6 +64,19 @@ public class GlobalExceptionHandler {
                 .timestamp(Instant.now())
                 .build();
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+
+    @ExceptionHandler(ForbiddenException.class)
+    public ResponseEntity<ErrorResponse> handleForbidden(ForbiddenException ex, HttpServletRequest request) {
+        ErrorResponse response = ErrorResponse.builder()
+                .success(false)
+                .status(HttpStatus.FORBIDDEN.value())
+                .error(HttpStatus.FORBIDDEN.getReasonPhrase())
+                .message(ex.getMessage())
+                .path(request.getRequestURI())
+                .timestamp(Instant.now())
+                .build();
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

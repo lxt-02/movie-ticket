@@ -12,6 +12,7 @@ import com.mv.showtimeservice.domain.model.showtime.entity.ShowtimeSeat;
 import com.mv.showtimeservice.domain.model.showtime.enums.ShowtimeSeatStatus;
 import com.mv.showtimeservice.domain.model.showtime.enums.ShowtimeStatus;
 import lombok.RequiredArgsConstructor;
+import com.mv.showtimeservice.application.dto.ShowtimeSchedulePolicy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,6 +32,7 @@ public class CreateShowtimeService implements CreateShowtimeUseCase {
     private final ShowtimeSnapshotPort showtimeSnapshotPort;
     private final ShowtimeRepositoryPort showtimeRepositoryPort;
     private final ShowtimeSeatRepositoryPort showtimeSeatRepositoryPort;
+    private final ShowtimeSchedulePolicy schedulePolicy;
 
     @Override
     @Transactional
@@ -48,6 +50,11 @@ public class CreateShowtimeService implements CreateShowtimeUseCase {
 
         showtimeSnapshotPort.saveMovieSnapshot(movie);
         showtimeSnapshotPort.saveScreenSnapshot(cinema, screen);
+
+        // One showtime at a time per screen: lock the screen, then check the schedule.
+        showtimeSnapshotPort.lockScreen(screen.screenId());
+        ScheduleRules.refuseOverlap(showtimeRepositoryPort, schedulePolicy, screen.screenId(),
+                command.getStartTime(), endTime, null);
 
         Showtime showtime = Showtime.builder()
                 .id(showtimeId)
