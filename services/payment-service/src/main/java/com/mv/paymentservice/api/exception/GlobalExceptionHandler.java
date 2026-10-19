@@ -1,15 +1,15 @@
 package com.mv.paymentservice.api.exception;
 
 import com.mv.paymentservice.domain.model.payment.exception.DomainException;
-import com.mv.paymentservice.domain.model.payment.exception.IdempotencyConflictException;
 import com.mv.paymentservice.domain.model.payment.exception.InvalidPaymentException;
-import com.mv.paymentservice.domain.model.payment.exception.PaymentExpiredException;
+import com.mv.paymentservice.domain.model.payment.exception.InvalidWebhookException;
 import com.mv.paymentservice.domain.model.payment.exception.PaymentNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -20,6 +20,20 @@ import java.util.stream.Collectors;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    /** Missing X-User-Id (or another required header): the caller is not identified. */
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<ErrorResponse> handleMissingHeader(MissingRequestHeaderException ex, HttpServletRequest request) {
+        HttpStatus status = "X-User-Id".equalsIgnoreCase(ex.getHeaderName()) ? HttpStatus.UNAUTHORIZED : HttpStatus.BAD_REQUEST;
+        ErrorResponse response = ErrorResponse.builder()
+                .status(status.value())
+                .error(status.getReasonPhrase())
+                .message("Missing required header " + ex.getHeaderName())
+                .path(request.getRequestURI())
+                .timestamp(Instant.now())
+                .build();
+        return ResponseEntity.status(status).body(response);
+    }
 
     @ExceptionHandler(PaymentNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(PaymentNotFoundException ex, HttpServletRequest request) {
@@ -35,29 +49,15 @@ public class GlobalExceptionHandler {
         );
     }
 
-    @ExceptionHandler(PaymentExpiredException.class)
-    public ResponseEntity<ErrorResponse> handleExpired(PaymentExpiredException ex, HttpServletRequest request) {
-        log.warn("Payment expired: {}", ex.getMessage());
-        return ResponseEntity.status(HttpStatus.GONE).body(
+    @ExceptionHandler(InvalidWebhookException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidWebhook(InvalidWebhookException ex, HttpServletRequest request) {
+        log.warn("Rejected PayOS webhook: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(
                 ErrorResponse.builder()
                         .timestamp(Instant.now())
-                        .status(HttpStatus.GONE.value())
-                        .error(HttpStatus.GONE.getReasonPhrase())
-                        .message(ex.getMessage())
-                        .path(request.getRequestURI())
-                        .build()
-        );
-    }
-
-    @ExceptionHandler(IdempotencyConflictException.class)
-    public ResponseEntity<ErrorResponse> handleIdempotencyConflict(IdempotencyConflictException ex, HttpServletRequest request) {
-        log.warn("Idempotency conflict: {}", ex.getMessage());
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(
-                ErrorResponse.builder()
-                        .timestamp(Instant.now())
-                        .status(HttpStatus.CONFLICT.value())
-                        .error(HttpStatus.CONFLICT.getReasonPhrase())
-                        .message(ex.getMessage())
+                        .status(HttpStatus.BAD_REQUEST.value())
+                        .error(HttpStatus.BAD_REQUEST.getReasonPhrase())
+                        .message("Invalid webhook: " + ex.getMessage())
                         .path(request.getRequestURI())
                         .build()
         );

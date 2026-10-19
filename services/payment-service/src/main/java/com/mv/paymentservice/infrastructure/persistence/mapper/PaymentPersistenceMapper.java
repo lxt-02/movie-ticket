@@ -1,7 +1,9 @@
 package com.mv.paymentservice.infrastructure.persistence.mapper;
 
 import com.mv.paymentservice.domain.model.payment.aggregate.Payment;
+import com.mv.paymentservice.domain.model.payment.entity.PaymentTransaction;
 import com.mv.paymentservice.infrastructure.persistence.entity.PaymentEntity;
+import com.mv.paymentservice.infrastructure.persistence.entity.PaymentTransactionEntity;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -11,21 +13,24 @@ public class PaymentPersistenceMapper {
         if (entity == null) {
             return null;
         }
-
         return Payment.builder()
                 .id(entity.getId())
                 .bookingId(entity.getBookingId())
                 .userId(entity.getUserId())
-                .provider(entity.getProvider())
-                .providerTransactionId(entity.getProviderTransactionId())
+                .paymentCode(entity.getPaymentCode())
+                .paymentMethod(entity.getPaymentMethod())
+                .status(entity.getPaymentStatus())
                 .amount(entity.getAmount())
                 .currency(entity.getCurrency())
-                .status(entity.getStatus())
-                .paymentUrl(entity.getPaymentUrl())
+                .checkoutUrl(entity.getCheckoutUrl())
+                .qrCode(entity.getQrCode())
+                .gatewayProvider(entity.getGatewayProvider())
+                .payosOrderCode(entity.getPayosOrderCode())
+                .gatewayTransactionId(entity.getGatewayTransactionId())
                 .idempotencyKey(entity.getIdempotencyKey())
-                .requestHash(entity.getRequestHash())
+                .failureReason(entity.getFailureReason())
                 .paidAt(entity.getPaidAt())
-                .expiresAt(entity.getExpiresAt())
+                .expiredAt(entity.getExpiredAt())
                 .createdAt(entity.getCreatedAt())
                 .updatedAt(entity.getUpdatedAt())
                 .build();
@@ -35,23 +40,43 @@ public class PaymentPersistenceMapper {
         if (domain == null) {
             return null;
         }
-
         return PaymentEntity.builder()
                 .id(domain.getId())
                 .bookingId(domain.getBookingId())
                 .userId(domain.getUserId())
-                .provider(domain.getProvider())
-                .providerTransactionId(domain.getProviderTransactionId())
+                .paymentCode(domain.getPaymentCode())
+                .paymentMethod(domain.getPaymentMethod())
+                .paymentStatus(domain.getStatus())
                 .amount(domain.getAmount())
                 .currency(domain.getCurrency())
-                .status(domain.getStatus())
-                .paymentUrl(domain.getPaymentUrl())
+                .checkoutUrl(domain.getCheckoutUrl())
+                .qrCode(domain.getQrCode())
+                .gatewayProvider(domain.getGatewayProvider())
+                .payosOrderCode(domain.getPayosOrderCode())
+                .gatewayTransactionId(domain.getGatewayTransactionId())
                 .idempotencyKey(domain.getIdempotencyKey())
-                .requestHash(domain.getRequestHash())
+                .failureReason(domain.getFailureReason())
                 .paidAt(domain.getPaidAt())
-                .expiresAt(domain.getExpiresAt())
+                .expiredAt(domain.getExpiredAt())
                 .createdAt(domain.getCreatedAt())
                 .updatedAt(domain.getUpdatedAt())
+                .build();
+    }
+
+    public PaymentTransactionEntity toEntity(PaymentTransaction domain) {
+        if (domain == null) {
+            return null;
+        }
+        return PaymentTransactionEntity.builder()
+                .id(domain.getId())
+                .paymentId(domain.getPaymentId())
+                .transactionCode(domain.getTransactionCode())
+                .gatewayTransactionId(domain.getGatewayTransactionId())
+                .transactionType(domain.getTransactionType())
+                .transactionStatus(domain.getTransactionStatus())
+                .amount(domain.getAmount())
+                .rawResponse(domain.getRawResponse())
+                .createdAt(domain.getCreatedAt())
                 .build();
     }
 }

@@ -8,5 +8,8 @@ import java.util.UUID;
 
 public interface GetPaymentUseCase {
     Payment getPaymentById(GetPaymentQuery query);
+
     List<Payment> getPaymentsByBookingId(UUID bookingId);
+
+    Payment getLatestPaymentByBookingId(UUID bookingId);
 }
