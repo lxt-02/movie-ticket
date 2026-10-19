@@ -34,3 +34,7 @@ build/
 .vscode/
 
 testpostman.md
+
+### Env ###
+.env
+!.env.example
