@@ -41,31 +41,22 @@ public class HoldSeatsService implements HoldSeatsUseCase {
     @Override
     @Transactional
     public HoldSeatsResult execute(HoldSeatsCommand command) {
-        // 1. Idempotency check:
-        if (command.getIdempotencyKey() != null && !command.getIdempotencyKey().isBlank()) {
-            Optional<SeatHold> existingHoldOpt = loadSeatHoldPort.findByIdempotencyKey(command.getIdempotencyKey());
-            if (existingHoldOpt.isPresent()) {
-                SeatHold existingHold = existingHoldOpt.get();
-                if (command.getRequestHash() != null && command.getRequestHash().equals(existingHold.getRequestHash())) {
-                    Showtime showtime = showtimeRepositoryPort.findById(existingHold.getShowtimeId())
-                            .orElseThrow(() -> new ShowtimeNotFoundException(existingHold.getShowtimeId()));
-                    List<ShowtimeSeat> seats = showtimeSeatRepositoryPort.findByHoldId(existingHold.getId());
-                    return new HoldSeatsResult(existingHold, showtime, seats);
-                } else {
-                    throw new SeatHoldConflictException("Idempotency key reused with different request payload");
-                }
-            }
+        if (command.getBookingId() == null) {
+            throw new IllegalArgumentException("bookingId must not be null");
         }
 
-        // Check if bookingId is already associated with another hold
-        Optional<SeatHold> bookingHoldOpt = loadSeatHoldPort.findByBookingId(command.getBookingId());
-        if (bookingHoldOpt.isPresent()) {
-            throw new SeatHoldConflictException("Booking ID " + command.getBookingId() + " already has an existing seat hold");
-        }
-
-        // 2. Lock showtime row
+        // 1. Lock showtime row first. This serializes concurrent requests for the same bookingId
+        //    and, being the first statement, makes the idempotency read below see committed holds
+        //    (MySQL REPEATABLE READ takes its snapshot on the first non-locking read).
         Showtime showtime = showtimeRepositoryPort.findByIdWithLock(command.getShowtimeId())
                 .orElseThrow(() -> new ShowtimeNotFoundException(command.getShowtimeId()));
+
+        // 2. Idempotency by bookingId (seat_holds.booking_id is UNIQUE).
+        //    Same payload -> return the existing hold; different payload -> conflict.
+        Optional<HoldSeatsResult> replay = findExistingHold(command);
+        if (replay.isPresent()) {
+            return replay.get();
+        }
 
         if (!showtime.isSelling()) {
             throw new SeatUnavailableException("Showtime is not currently available for seat reservation");
@@ -133,6 +124,24 @@ public class HoldSeatsService implements HoldSeatsUseCase {
         List<ShowtimeSeat> savedSeats = showtimeSeatRepositoryPort.saveAll(lockedSeats);
 
         return new HoldSeatsResult(savedHold, showtime, savedSeats);
+    }
+
+    private Optional<HoldSeatsResult> findExistingHold(HoldSeatsCommand command) {
+        Optional<SeatHold> existingHoldOpt = loadSeatHoldPort.findByBookingId(command.getBookingId());
+        if (existingHoldOpt.isEmpty()) {
+            return Optional.empty();
+        }
+
+        SeatHold existingHold = existingHoldOpt.get();
+        if (command.getRequestHash() == null || !command.getRequestHash().equals(existingHold.getRequestHash())) {
+            throw new SeatHoldConflictException(
+                    "Booking " + command.getBookingId() + " already has a seat hold with a different request");
+        }
+
+        Showtime showtime = showtimeRepositoryPort.findById(existingHold.getShowtimeId())
+                .orElseThrow(() -> new ShowtimeNotFoundException(existingHold.getShowtimeId()));
+        List<ShowtimeSeat> seats = showtimeSeatRepositoryPort.findByHoldId(existingHold.getId());
+        return Optional.of(new HoldSeatsResult(existingHold, showtime, seats));
     }
 
     private void expireExistingHold(UUID holdId) {

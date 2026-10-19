@@ -9,5 +9,4 @@ public interface SeatHoldRepository {
     SeatHold save(SeatHold hold);
     Optional<SeatHold> findById(UUID id);
     Optional<SeatHold> findByBookingId(UUID bookingId);
-    Optional<SeatHold> findByIdempotencyKey(String idempotencyKey);
 }
