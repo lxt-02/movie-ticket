@@ -9,6 +9,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
+import com.mv.bookingservice.application.exception.DependencyUnavailableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -18,6 +20,38 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    /** showtime / user service down, or its circuit breaker OPEN: nothing was done, try again later. */
+    @ExceptionHandler(DependencyUnavailableException.class)
+    public ResponseEntity<ErrorResponse> handleDependencyUnavailable(DependencyUnavailableException ex,
+                                                                     HttpServletRequest request) {
+        ErrorResponse response = ErrorResponse.builder()
+                .success(false)
+                .status(HttpStatus.SERVICE_UNAVAILABLE.value())
+                .error(HttpStatus.SERVICE_UNAVAILABLE.getReasonPhrase())
+                .message(ex.getMessage())
+                .path(request.getRequestURI())
+                .timestamp(Instant.now())
+                .build();
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header("Retry-After", "20")
+                .body(response);
+    }
+
+    /** Missing X-User-Id (or another required header): the caller is not identified. */
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<ErrorResponse> handleMissingHeader(MissingRequestHeaderException ex, HttpServletRequest request) {
+        HttpStatus status = "X-User-Id".equalsIgnoreCase(ex.getHeaderName()) ? HttpStatus.UNAUTHORIZED : HttpStatus.BAD_REQUEST;
+        ErrorResponse response = ErrorResponse.builder()
+                .success(false)
+                .status(status.value())
+                .error(status.getReasonPhrase())
+                .message("Missing required header " + ex.getHeaderName())
+                .path(request.getRequestURI())
+                .timestamp(Instant.now())
+                .build();
+        return ResponseEntity.status(status).body(response);
+    }
 
     @ExceptionHandler(BookingNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(BookingNotFoundException ex, HttpServletRequest request) {

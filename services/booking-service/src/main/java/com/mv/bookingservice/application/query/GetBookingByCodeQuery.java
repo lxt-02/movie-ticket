@@ -6,6 +6,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.util.UUID;
+
 @Getter
 @Setter
 @Builder
@@ -13,4 +15,5 @@ import lombok.Setter;
 @AllArgsConstructor
 public class GetBookingByCodeQuery {
     private String bookingCode;
+    private UUID userId;
 }

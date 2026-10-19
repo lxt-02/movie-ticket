@@ -26,7 +26,8 @@ public class BookingDtoMapper {
         if (request == null) {
             return null;
         }
-        UUID userId = resolvedUserId != null ? resolvedUserId : request.getUserId();
+        // Caller identity comes only from the X-User-Id header, never from the body.
+        UUID userId = resolvedUserId;
         String requestHash = computeRequestHash(request);
 
         List<CreateBookingSeatCommand> seats = new ArrayList<>();
@@ -46,9 +47,10 @@ public class BookingDtoMapper {
                 .holdId(request.getHoldId())
                 .idempotencyKey(idempotencyKey)
                 .requestHash(requestHash)
-                .currency(request.getCurrency() != null ? request.getCurrency() : "VND")
+                // Price and currency are decided by the server (seat prices from Showtime); the client cannot set them.
+                .currency("VND")
                 .expiresAt(request.getExpiresAt())
-                .discountAmount(request.getDiscountAmount())
+                .discountAmount(null)
                 .seats(seats)
                 .build();
     }
@@ -139,8 +141,7 @@ public class BookingDtoMapper {
         try {
             // Build normalized payload representation
             StringBuilder sb = new StringBuilder();
-            sb.append(request.getShowtimeId()).append("|")
-              .append(request.getDiscountAmount()).append("|");
+            sb.append(request.getShowtimeId()).append("|");
 
             if (request.getSeats() != null) {
                 request.getSeats().stream()

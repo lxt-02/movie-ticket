@@ -2,7 +2,9 @@ package com.mv.bookingservice.application.service;
 
 import com.mv.bookingservice.application.command.CreateBookingCommand;
 import com.mv.bookingservice.application.command.CreateBookingSeatCommand;
+import com.mv.bookingservice.application.dto.BookingPaymentPolicy;
 import com.mv.bookingservice.application.port.out.LoadBookingPort;
+import com.mv.bookingservice.application.port.out.PaymentCommandPort;
 import com.mv.bookingservice.application.port.out.SaveBookingPort;
 import com.mv.bookingservice.application.port.out.ShowtimeClientPort;
 import com.mv.bookingservice.application.port.out.UserClientPort;
@@ -12,6 +14,7 @@ import com.mv.bookingservice.domain.model.booking.exception.BookingValidationExc
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -40,11 +43,15 @@ class CreateBookingServiceTest {
     @Mock
     private UserClientPort userClientPort;
 
+    @Mock
+    private PaymentCommandPort paymentCommandPort;
+
     private CreateBookingService createBookingService;
 
     @BeforeEach
     void setUp() {
-        createBookingService = new CreateBookingService(saveBookingPort, loadBookingPort, showtimeClientPort, userClientPort);
+        createBookingService = new CreateBookingService(saveBookingPort, loadBookingPort, showtimeClientPort, userClientPort, paymentCommandPort,
+                new BookingPaymentPolicy(3, java.time.Duration.ofSeconds(90), 50));
     }
 
     @Test
@@ -77,7 +84,7 @@ class CreateBookingServiceTest {
 
         when(loadBookingPort.findByUserIdAndIdempotencyKey(userId, "idem-key-1")).thenReturn(Optional.empty());
         when(userClientPort.validateUser(userId)).thenReturn(new UserClientPort.UserValidationResult(userId, "u@example.com", "User", "ACTIVE"));
-        when(showtimeClientPort.holdSeats(eq(showtimeId), any(UUID.class), eq(List.of(showtimeSeatId)), eq("idem-key-1")))
+        when(showtimeClientPort.holdSeats(eq(showtimeId), any(UUID.class), eq(List.of(showtimeSeatId))))
                 .thenReturn(new ShowtimeClientPort.SeatHoldResult(
                         holdId,
                         Instant.now().plusSeconds(600),
@@ -95,7 +102,11 @@ class CreateBookingServiceTest {
         assertEquals(userId, result.getUserId());
         assertEquals("idem-key-1", result.getIdempotencyKey());
         assertEquals(holdId, result.getHoldId());
+        // Hold ends in 600s; the payment deadline is 180s earlier.
+        org.junit.jupiter.api.Assertions.assertTrue(result.getExpiresAt().isBefore(Instant.now().plusSeconds(421)));
+        org.junit.jupiter.api.Assertions.assertTrue(result.getExpiresAt().isAfter(Instant.now().plusSeconds(410)));
         verify(saveBookingPort, times(1)).save(any(Booking.class));
+        verify(paymentCommandPort).requestPayment(result);
     }
 
     @Test
@@ -113,7 +124,7 @@ class CreateBookingServiceTest {
 
         assertThrows(BookingValidationException.class, () -> createBookingService.execute(command));
 
-        verify(showtimeClientPort, never()).holdSeats(any(), any(), any(), any());
+        verify(showtimeClientPort, never()).holdSeats(any(), any(), any());
         verify(saveBookingPort, never()).save(any());
     }
 
@@ -126,7 +137,7 @@ class CreateBookingServiceTest {
         assertThrows(BookingValidationException.class, () -> createBookingService.execute(command));
 
         verify(userClientPort, never()).validateUser(any());
-        verify(showtimeClientPort, never()).holdSeats(any(), any(), any(), any());
+        verify(showtimeClientPort, never()).holdSeats(any(), any(), any());
         verify(saveBookingPort, never()).save(any());
     }
 
@@ -154,7 +165,7 @@ class CreateBookingServiceTest {
 
         when(loadBookingPort.findByUserIdAndIdempotencyKey(userId, "idem-key-1")).thenReturn(Optional.empty());
         when(userClientPort.validateUser(userId)).thenReturn(new UserClientPort.UserValidationResult(userId, "u@example.com", "User", "ACTIVE"));
-        when(showtimeClientPort.holdSeats(eq(showtimeId), any(UUID.class), eq(List.of(showtimeSeatId)), eq("idem-key-1")))
+        when(showtimeClientPort.holdSeats(eq(showtimeId), any(UUID.class), eq(List.of(showtimeSeatId))))
                 .thenReturn(new ShowtimeClientPort.SeatHoldResult(
                         holdId,
                         Instant.now().plusSeconds(600),
@@ -215,5 +226,69 @@ class CreateBookingServiceTest {
 
         assertThrows(BookingConflictException.class, () -> createBookingService.execute(command));
         verify(saveBookingPort, never()).save(any(Booking.class));
+    }
+
+    @Test
+    void sameClientKeyFromDifferentUsersMustSendDifferentBookingIdsToShowtime() {
+        UUID userA = UUID.randomUUID();
+        UUID userB = UUID.randomUUID();
+        UUID showtimeId = UUID.randomUUID();
+        UUID showtimeSeatId = UUID.randomUUID();
+
+        when(loadBookingPort.findByUserIdAndIdempotencyKey(any(UUID.class), eq("same-key"))).thenReturn(Optional.empty());
+        when(userClientPort.validateUser(any(UUID.class))).thenAnswer(inv ->
+                new UserClientPort.UserValidationResult(inv.getArgument(0), "u@example.com", "User", "ACTIVE"));
+        when(showtimeClientPort.holdSeats(eq(showtimeId), any(UUID.class), anyList()))
+                .thenAnswer(inv -> new ShowtimeClientPort.SeatHoldResult(
+                        UUID.randomUUID(),
+                        Instant.now().plusSeconds(600),
+                        "Movie 1",
+                        "Cinema 1",
+                        "Screen 1",
+                        Instant.now().plusSeconds(3600),
+                        List.of(new ShowtimeClientPort.HeldSeatDetail(showtimeSeatId, UUID.randomUUID(), "A1", new BigDecimal("100000.00")))
+                ));
+        when(saveBookingPort.save(any(Booking.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        createBookingService.execute(commandFor(userA, showtimeId, showtimeSeatId, "same-key"));
+        createBookingService.execute(commandFor(userB, showtimeId, showtimeSeatId, "same-key"));
+
+        ArgumentCaptor<UUID> bookingIds = ArgumentCaptor.forClass(UUID.class);
+        verify(showtimeClientPort, times(2)).holdSeats(eq(showtimeId), bookingIds.capture(), anyList());
+        assertNotEquals(bookingIds.getAllValues().get(0), bookingIds.getAllValues().get(1));
+    }
+
+    @Test
+    void retryWithSameUserAndKeyMustReuseSameBookingId() {
+        UUID userId = UUID.randomUUID();
+        UUID showtimeId = UUID.randomUUID();
+        UUID showtimeSeatId = UUID.randomUUID();
+
+        when(loadBookingPort.findByUserIdAndIdempotencyKey(userId, "retry-key")).thenReturn(Optional.empty());
+        when(userClientPort.validateUser(userId)).thenReturn(new UserClientPort.UserValidationResult(userId, "u@example.com", "User", "ACTIVE"));
+        // Simulate a timeout on the Showtime call followed by a retry with the same user + key.
+        when(showtimeClientPort.holdSeats(eq(showtimeId), any(UUID.class), anyList()))
+                .thenThrow(new IllegalStateException("timeout"));
+
+        assertThrows(IllegalStateException.class,
+                () -> createBookingService.execute(commandFor(userId, showtimeId, showtimeSeatId, "retry-key")));
+        assertThrows(IllegalStateException.class,
+                () -> createBookingService.execute(commandFor(userId, showtimeId, showtimeSeatId, "retry-key")));
+
+        ArgumentCaptor<UUID> bookingIds = ArgumentCaptor.forClass(UUID.class);
+        verify(showtimeClientPort, times(2)).holdSeats(eq(showtimeId), bookingIds.capture(), anyList());
+        assertEquals(bookingIds.getAllValues().get(0), bookingIds.getAllValues().get(1));
+    }
+
+    private CreateBookingCommand commandFor(UUID userId, UUID showtimeId, UUID showtimeSeatId, String key) {
+        return CreateBookingCommand.builder()
+                .userId(userId)
+                .showtimeId(showtimeId)
+                .idempotencyKey(key)
+                .requestHash("hash-" + key)
+                .currency("VND")
+                .discountAmount(BigDecimal.ZERO)
+                .seats(List.of(CreateBookingSeatCommand.builder().showtimeSeatId(showtimeSeatId).build()))
+                .build();
     }
 }

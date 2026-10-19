@@ -70,6 +70,20 @@ public class BookingRepositoryAdapter implements BookingRepository, SaveBookingP
     }
 
     @Override
+    public List<Booking> findOverduePendingForUpdate(Instant cutoff, int limit) {
+        return bookingJpaRepository.findOverduePendingForUpdate(cutoff, limit).stream()
+                .map(bookingPersistenceMapper::toDomain)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public List<Booking> findConfirmingForUpdate(int limit) {
+        return bookingJpaRepository.findConfirmingForUpdate(limit).stream()
+                .map(bookingPersistenceMapper::toDomain)
+                .collect(Collectors.toList());
+    }
+
+    @Override
     public boolean existsById(UUID id) {
         return bookingJpaRepository.existsById(id);
     }

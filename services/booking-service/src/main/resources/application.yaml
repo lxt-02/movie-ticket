@@ -2,13 +2,18 @@ server:
   port: 8083
 
 spring:
+  config:
+    import:
+      # Load variables from this module's .env (run from module dir or from project root)
+      - optional:file:.env[.properties]
+      - optional:file:services/booking-service/.env[.properties]
   application:
     name: booking-service
 
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/booking_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
-    username: ${SPRING_DATASOURCE_USERNAME:root}
-    password: ${SPRING_DATASOURCE_PASSWORD:12345}
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   jpa:
@@ -22,21 +27,83 @@ spring:
         type:
           preferred_uuid_jdbc_type: CHAR
 
+  cloud:
+    openfeign:
+      client:
+        config:
+          # Without timeouts a hung service blocks a DB transaction for 60s and the circuit breaker never sees
+          # a failure. Keys = @FeignClient names.
+          showtime-service:
+            connect-timeout: 2000
+            read-timeout: 5000
+          user-service:
+            connect-timeout: 2000
+            read-timeout: 3000
+
   flyway:
     enabled: true
     baseline-on-migrate: true
     locations: classpath:db/migration
 
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+    consumer:
+      group-id: booking-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+booking:
+  resilience:
+    circuit-breaker:
+      # Breakers "showtime" and "user". Only technical failures count (down, timeout, 5xx); 4xx answers do not.
+      sliding-window-size: 10           # failure rate computed over the last 10 calls
+      minimum-number-of-calls: 5        # no decision before 5 calls
+      failure-rate-threshold: 50        # >= 50% failed -> OPEN
+      wait-duration-in-open-seconds: 20 # OPEN rejects calls for 20s, then HALF_OPEN
+      permitted-calls-in-half-open: 3   # 3 trial calls; all OK -> CLOSED, any failure -> OPEN again
+  scheduling:
+    enabled: true
+  payment:
+    # Payment links per booking (first one included); "pay again" opens the next one.
+    max-attempts: 3
+    # Payment deadline (PayOS link expiry) = seat hold end - this margin. Must be > expiry.grace-seconds.
+    hold-safety-margin-seconds: 180
+  expiry:
+    # PENDING bookings are expired this long after expires_at, so a transfer made just before the deadline can land.
+    grace-seconds: 90
+    batch-size: 50
+    delay-ms: 30000
+    initial-delay-ms: 30000
+  confirmation-retry:
+    delay-ms: 60000
+    initial-delay-ms: 45000
+    # A paid booking whose seats still are not confirmed after this long moves to REFUND_PENDING.
+    timeout-minutes: 30
+  kafka:
+    payment-commands: payment-commands
+    payment-events: payment-events
+    relay-delay-ms: 2000
+    relay-initial-delay-ms: 3000
+    relay-batch-size: 50
+    publish-timeout-ms: 5000
+
 clients:
   showtime:
-    base-url: ${SHOWTIME_SERVICE_URL:}
+    base-url: ${SHOWTIME_SERVICE_URL}
   user:
-    base-url: ${USER_SERVICE_URL:}
+    base-url: ${USER_SERVICE_URL}
 
 eureka:
   client:
     service-url:
-      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE:http://localhost:8761/eureka/}
+      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE}
   instance:
     prefer-ip-address: true
     instance-id: ${spring.application.name}:${server.port}

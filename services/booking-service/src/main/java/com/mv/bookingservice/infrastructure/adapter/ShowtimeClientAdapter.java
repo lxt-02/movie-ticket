@@ -1,51 +1,103 @@
 package com.mv.bookingservice.infrastructure.adapter;
 
+import com.mv.bookingservice.application.exception.SeatHoldRejectedException;
 import com.mv.bookingservice.application.port.out.ShowtimeClientPort;
+import com.mv.bookingservice.domain.model.booking.exception.BookingConflictException;
+import com.mv.bookingservice.domain.model.booking.exception.BookingValidationException;
 import com.mv.bookingservice.infrastructure.client.ShowtimeFeignClient;
 import com.mv.bookingservice.infrastructure.client.dto.ApiResponse;
 import com.mv.bookingservice.infrastructure.client.dto.HeldSeatResponse;
 import com.mv.bookingservice.infrastructure.client.dto.HoldSeatsRequest;
 import com.mv.bookingservice.infrastructure.client.dto.SeatHoldResponse;
-import lombok.RequiredArgsConstructor;
+import com.mv.bookingservice.infrastructure.resilience.ResilienceConfig;
+import com.mv.bookingservice.infrastructure.resilience.ResilientCall;
+import feign.FeignException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+/**
+ * Feign calls to showtime-service, all behind the "showtime" circuit breaker.
+ * <ul>
+ *     <li>Technical failure (down, timeout, 5xx): counted by the breaker, rethrown as is.</li>
+ *     <li>Business answer (4xx): mapped to a booking exception, NOT counted as a failure.</li>
+ *     <li>Breaker OPEN: {@code DependencyUnavailableException} (HTTP 503) without calling showtime.</li>
+ * </ul>
+ */
 @Component
-@RequiredArgsConstructor
 public class ShowtimeClientAdapter implements ShowtimeClientPort {
 
+    private static final String SERVICE = "showtime-service";
+
     private final ShowtimeFeignClient showtimeFeignClient;
+    private final CircuitBreaker circuitBreaker;
+
+    public ShowtimeClientAdapter(ShowtimeFeignClient showtimeFeignClient, CircuitBreakerRegistry registry) {
+        this.showtimeFeignClient = showtimeFeignClient;
+        this.circuitBreaker = registry.circuitBreaker(ResilienceConfig.SHOWTIME);
+    }
 
     @Override
-    public SeatHoldResult holdSeats(UUID showtimeId, UUID bookingId, List<UUID> showtimeSeatIds, String idempotencyKey) {
+    public SeatHoldResult holdSeats(UUID showtimeId, UUID bookingId, List<UUID> showtimeSeatIds) {
         HoldSeatsRequest request = HoldSeatsRequest.builder()
                 .bookingId(bookingId)
                 .showtimeSeatIds(showtimeSeatIds)
                 .build();
 
-        ApiResponse<SeatHoldResponse> response = showtimeFeignClient.holdSeats(showtimeId, idempotencyKey, request);
-        return toSeatHoldResult(requireData(response, "hold seats"));
+        return ResilientCall.run(circuitBreaker, SERVICE, () -> {
+            ApiResponse<SeatHoldResponse> response;
+            try {
+                response = showtimeFeignClient.holdSeats(showtimeId, request);
+            } catch (FeignException e) {
+                if (e.status() == 409) {
+                    throw new BookingConflictException("Selected seats are no longer available");
+                }
+                if (e.status() == 404 || e.status() == 400) {
+                    throw new BookingValidationException("Showtime or seats not found / not bookable");
+                }
+                throw e;
+            }
+            return toSeatHoldResult(requireData(response, "hold seats"));
+        });
     }
 
     @Override
     public SeatHoldResult getHoldByBookingId(UUID bookingId) {
-        ApiResponse<SeatHoldResponse> response = showtimeFeignClient.getHoldByBookingId(bookingId);
-        return toSeatHoldResult(requireData(response, "get hold by booking"));
+        return ResilientCall.run(circuitBreaker, SERVICE, () ->
+                toSeatHoldResult(requireData(showtimeFeignClient.getHoldByBookingId(bookingId), "get hold by booking")));
     }
 
     @Override
     public SeatHoldResult releaseHold(UUID holdId) {
-        ApiResponse<SeatHoldResponse> response = showtimeFeignClient.releaseHold(holdId);
-        return toSeatHoldResult(requireData(response, "release hold"));
+        return ResilientCall.run(circuitBreaker, SERVICE, () ->
+                toSeatHoldResult(requireData(showtimeFeignClient.releaseHold(holdId), "release hold")));
     }
 
     @Override
     public SeatHoldResult confirmHold(UUID holdId) {
-        ApiResponse<SeatHoldResponse> response = showtimeFeignClient.confirmHold(holdId);
-        return toSeatHoldResult(requireData(response, "confirm hold"));
+        return ResilientCall.run(circuitBreaker, SERVICE, () -> {
+            ApiResponse<SeatHoldResponse> response;
+            try {
+                response = showtimeFeignClient.confirmHold(holdId);
+            } catch (FeignException e) {
+                if (e.status() == 409 || e.status() == 404 || e.status() == 410) {
+                    throw new SeatHoldRejectedException(
+                            "Showtime refused to confirm hold " + holdId + " (HTTP " + e.status() + ")", e);
+                }
+                throw e; // timeout / 5xx: temporary, the caller retries
+            }
+            SeatHoldResponse data = requireData(response, "confirm hold");
+            // Never trust a 200 alone: only a CONFIRMED hold means the seats are BOOKED.
+            if (!"CONFIRMED".equalsIgnoreCase(data.getStatus())) {
+                throw new SeatHoldRejectedException(
+                        "Showtime answered hold " + holdId + " with status " + data.getStatus() + " instead of CONFIRMED");
+            }
+            return toSeatHoldResult(data);
+        });
     }
 
     private SeatHoldResult toSeatHoldResult(SeatHoldResponse response) {

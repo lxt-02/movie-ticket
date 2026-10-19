@@ -103,6 +103,9 @@ public class BookingEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "payment_attempt", nullable = false)
+    private Integer paymentAttempt;
+
     @Builder.Default
     @OneToMany(mappedBy = "booking", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<BookingSeatEntity> seats = new ArrayList<>();

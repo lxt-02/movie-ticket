@@ -20,4 +20,10 @@ public interface LoadBookingPort {
     List<Booking> findByUserId(UUID userId);
 
     List<Booking> findByStatusAndExpiresAtBefore(BookingStatus status, Instant time);
+
+    /** PENDING bookings with expires_at before {@code cutoff}, locked with FOR UPDATE SKIP LOCKED. */
+    List<Booking> findOverduePendingForUpdate(Instant cutoff, int limit);
+
+    /** CONFIRMING bookings, oldest update first, locked with FOR UPDATE SKIP LOCKED. */
+    List<Booking> findConfirmingForUpdate(int limit);
 }

@@ -51,6 +51,7 @@ public class BookingPersistenceMapper {
                 .paidPaymentId(entity.getPaidPaymentId())
                 .version(entity.getVersion())
                 .updatedAt(entity.getUpdatedAt())
+                .paymentAttempt(entity.getPaymentAttempt() != null ? entity.getPaymentAttempt() : 1)
                 .seats(seats)
                 .build();
     }
@@ -84,6 +85,7 @@ public class BookingPersistenceMapper {
                 .paidPaymentId(domain.getPaidPaymentId())
                 .version(domain.getVersion())
                 .updatedAt(domain.getUpdatedAt())
+                .paymentAttempt(domain.currentPaymentAttempt())
                 .seats(new ArrayList<>())
                 .build();
 
