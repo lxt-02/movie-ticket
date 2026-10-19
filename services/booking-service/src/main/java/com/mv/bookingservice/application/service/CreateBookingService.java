@@ -2,8 +2,10 @@ package com.mv.bookingservice.application.service;
 
 import com.mv.bookingservice.application.command.CreateBookingCommand;
 import com.mv.bookingservice.application.command.CreateBookingSeatCommand;
+import com.mv.bookingservice.application.dto.BookingPaymentPolicy;
 import com.mv.bookingservice.application.port.in.CreateBookingUseCase;
 import com.mv.bookingservice.application.port.out.LoadBookingPort;
+import com.mv.bookingservice.application.port.out.PaymentCommandPort;
 import com.mv.bookingservice.application.port.out.SaveBookingPort;
 import com.mv.bookingservice.application.port.out.ShowtimeClientPort;
 import com.mv.bookingservice.application.port.out.UserClientPort;
@@ -16,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -30,6 +33,8 @@ public class CreateBookingService implements CreateBookingUseCase {
     private final LoadBookingPort loadBookingPort;
     private final ShowtimeClientPort showtimeClientPort;
     private final UserClientPort userClientPort;
+    private final PaymentCommandPort paymentCommandPort;
+    private final BookingPaymentPolicy policy;
 
     @Override
     @Transactional
@@ -62,16 +67,18 @@ public class CreateBookingService implements CreateBookingUseCase {
         }
 
         List<UUID> requestedSeatIds = extractShowtimeSeatIds(command.getSeats());
+        // bookingId is stable per (user, Idempotency-Key), so it doubles as the idempotency key
+        // for the Showtime call. The client's key stays inside Booking.
         UUID bookingId = stableBookingId(command.getUserId(), command.getIdempotencyKey());
         ShowtimeClientPort.SeatHoldResult hold = showtimeClientPort.holdSeats(
                 command.getShowtimeId(),
                 bookingId,
-                requestedSeatIds,
-                command.getIdempotencyKey()
+                requestedSeatIds
         );
 
         try {
             List<BookingSeat> seats = toBookingSeats(hold);
+            Instant paymentDeadline = paymentDeadline(hold);
             Booking booking = Booking.create(
                     bookingId,
                     command.getUserId(),
@@ -84,12 +91,15 @@ public class CreateBookingService implements CreateBookingUseCase {
                     command.getIdempotencyKey(),
                     command.getRequestHash(),
                     command.getCurrency(),
-                    hold.expiresAt(),
+                    paymentDeadline,
                     command.getDiscountAmount(),
                     seats
             );
 
-            return saveBookingPort.save(booking);
+            Booking saved = saveBookingPort.save(booking);
+            // Same transaction: the CREATE_PAYMENT command is stored in the outbox with the booking.
+            paymentCommandPort.requestPayment(saved);
+            return saved;
         } catch (RuntimeException ex) {
             if (hold != null && hold.holdId() != null) {
                 try {
@@ -110,6 +120,22 @@ public class CreateBookingService implements CreateBookingUseCase {
                 .map(CreateBookingSeatCommand::getShowtimeSeatId)
                 .distinct()
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Payment deadline = hold end - safety margin. The booking's expires_at, the PayOS link expiry and the
+     * "paid in time" check all use it, so the seats stay held a few minutes after the buyer's last chance to pay
+     * (a late webhook can still confirm them) and the expiry job releases them before Showtime reclaims them.
+     */
+    private Instant paymentDeadline(ShowtimeClientPort.SeatHoldResult hold) {
+        if (hold.expiresAt() == null) {
+            throw new BookingValidationException("Showtime did not return the seat hold expiry");
+        }
+        Instant deadline = hold.expiresAt().minus(policy.holdSafetyMargin());
+        if (!deadline.isAfter(Instant.now())) {
+            throw new BookingValidationException("Seat hold is too short to leave time for payment");
+        }
+        return deadline;
     }
 
     private UUID stableBookingId(UUID userId, String idempotencyKey) {
