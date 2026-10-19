@@ -8,7 +8,6 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 
 import java.util.UUID;
 
@@ -18,7 +17,6 @@ public interface ShowtimeFeignClient {
     @PostMapping("/internal/showtimes/{id}/holds")
     ApiResponse<SeatHoldResponse> holdSeats(
             @PathVariable("id") UUID showtimeId,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody HoldSeatsRequest request
     );
 

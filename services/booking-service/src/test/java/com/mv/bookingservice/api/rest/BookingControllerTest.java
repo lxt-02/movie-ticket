@@ -93,8 +93,6 @@ class BookingControllerTest {
                 .screenName("Screen IMAX")
                 .startTime(Instant.now().plusSeconds(7200))
                 .holdId(holdId)
-                .currency("VND")
-                .discountAmount(BigDecimal.ZERO)
                 .seats(List.of(seatReq))
                 .build();
 

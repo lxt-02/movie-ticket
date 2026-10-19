@@ -47,6 +47,8 @@ public class Booking {
     private UUID paidPaymentId;
     private Long version;
     private Instant updatedAt;
+    /** 1 for the first payment link; incremented by each "pay again". */
+    private Integer paymentAttempt;
 
     @Builder.Default
     private List<BookingSeat> seats = new ArrayList<>();
@@ -175,8 +177,51 @@ public class Booking {
                 .currency(currency != null ? currency : "VND")
                 .version(0L)
                 .updatedAt(now)
+                .paymentAttempt(1)
                 .seats(seats)
                 .build();
+    }
+
+    public int currentPaymentAttempt() {
+        return paymentAttempt == null || paymentAttempt < 1 ? 1 : paymentAttempt;
+    }
+
+    /**
+     * "Pay again": only for a PENDING booking whose seat hold has not expired, at most {@code maxAttempts} links.
+     */
+    public void startNewPaymentAttempt(int maxAttempts) {
+        if (status != BookingStatus.PENDING) {
+            throw new InvalidBookingStateException(status, "retryPayment");
+        }
+        if (isExpired()) {
+            throw new InvalidBookingStateException("Booking has already expired");
+        }
+        if (currentPaymentAttempt() >= maxAttempts) {
+            throw new BookingValidationException("Maximum payment attempts reached (" + maxAttempts + ")");
+        }
+        this.paymentAttempt = currentPaymentAttempt() + 1;
+        this.updatedAt = Instant.now();
+    }
+
+    /** True if the money was paid before the seat hold expired (the event may be processed later). */
+    public boolean wasPaidInTime(Instant paidAt) {
+        return expiresAt == null || paidAt == null || !paidAt.isAfter(expiresAt);
+    }
+
+    /**
+     * Payment received in time: PENDING -> CONFIRMING. Seats are confirmed in Showtime next; until then the
+     * booking stays CONFIRMING (the confirmation job retries).
+     */
+    public void markConfirming(UUID paymentId, Instant paidAt) {
+        if (status != BookingStatus.PENDING) {
+            throw new InvalidBookingStateException(status, "markConfirming");
+        }
+        if (!wasPaidInTime(paidAt)) {
+            throw new InvalidBookingStateException("Payment arrived after the booking expired");
+        }
+        this.status = BookingStatus.CONFIRMING;
+        this.paidPaymentId = paymentId;
+        this.updatedAt = Instant.now();
     }
 
     public void markConfirming(UUID paymentId) {

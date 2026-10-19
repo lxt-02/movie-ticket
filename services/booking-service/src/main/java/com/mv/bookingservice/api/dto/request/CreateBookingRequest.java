@@ -34,13 +34,7 @@ public class CreateBookingRequest {
 
     private UUID holdId;
 
-    @Builder.Default
-    private String currency = "VND";
-
     private java.time.Instant expiresAt;
-
-    @jakarta.validation.constraints.DecimalMin(value = "0.0", inclusive = true, message = "discountAmount must be greater than or equal to 0")
-    private java.math.BigDecimal discountAmount;
 
     @NotEmpty(message = "seats list must not be empty")
     @Valid
