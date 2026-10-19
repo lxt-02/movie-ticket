@@ -10,5 +10,9 @@ public interface LoadSeatHoldPort {
 
     Optional<SeatHold> findByBookingId(UUID bookingId);
 
-    Optional<SeatHold> findByIdempotencyKey(String idempotencyKey);
+    /** Showtime of a hold, read without loading or locking the hold (used to take the showtime lock first). */
+    Optional<UUID> findShowtimeIdByHoldId(UUID holdId);
+
+    /** Hold row locked with SELECT ... FOR UPDATE until the transaction ends. */
+    Optional<SeatHold> findByIdForUpdate(UUID id);
 }
