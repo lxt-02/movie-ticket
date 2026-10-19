@@ -62,4 +62,11 @@ public class ShowtimeSeatRepositoryAdapter implements ShowtimeSeatRepository, Sh
     public boolean existsByShowtimeId(UUID showtimeId) {
         return showtimeSeatJpaRepository.existsByShowtimeId(showtimeId);
     }
+
+    @Override
+    public long countTakenSeats(UUID showtimeId, java.time.Instant now) {
+        return showtimeSeatJpaRepository.countTaken(showtimeId, now,
+                com.mv.showtimeservice.domain.model.showtime.enums.ShowtimeSeatStatus.BOOKED,
+                com.mv.showtimeservice.domain.model.showtime.enums.ShowtimeSeatStatus.HELD);
+    }
 }
