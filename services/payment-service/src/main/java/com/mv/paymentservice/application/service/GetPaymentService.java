@@ -29,4 +29,10 @@ public class GetPaymentService implements GetPaymentUseCase {
     public List<Payment> getPaymentsByBookingId(UUID bookingId) {
         return loadPaymentPort.findByBookingId(bookingId);
     }
+
+    @Override
+    public Payment getLatestPaymentByBookingId(UUID bookingId) {
+        return loadPaymentPort.findLatestByBookingId(bookingId)
+                .orElseThrow(() -> new PaymentNotFoundException("No payment yet for booking " + bookingId));
+    }
 }

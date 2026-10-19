@@ -6,4 +6,8 @@ public class PaymentNotFoundException extends DomainException {
     public PaymentNotFoundException(UUID paymentId) {
         super("Payment not found with id: " + paymentId);
     }
+
+    public PaymentNotFoundException(String message) {
+        super(message);
+    }
 }
