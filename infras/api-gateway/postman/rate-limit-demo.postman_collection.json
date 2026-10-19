@@ -1,0 +1,342 @@
+{
+  "info": {
+    "name": "API Gateway - Rate Limit & Load Balancer Demo",
+    "description": "Token Bucket (RedisRateLimiter) with custom KeyResolvers: user, IP, API key.\n\nPolicies (replenish/burst/requested): user 1/3/1, IP 1/5/1, API key 2/5/1.\n\nDemo: click Send quickly (or Runner, 6 iterations, delay 0) to see 200 -> 429. Wait ~1s and send again: tokens refill.\n\nX-User-Id is trusted only because app.rate-limit.trust-user-id-header=true (dev/demo).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "userA",
+      "value": "user-A"
+    },
+    {
+      "key": "userB",
+      "value": "user-B"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Per user (X-User-Id)",
+      "item": [
+        {
+          "name": "User A - ping",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const remaining = pm.response.headers.get('X-RateLimit-Remaining');",
+                  "const retry = pm.response.headers.get('Retry-After');",
+                  "console.log(`${pm.info.requestName} -> ${pm.response.code} | remaining=${remaining} | retry-after=${retry}`);",
+                  "pm.test('Status is 200 or 429', () => pm.expect(pm.response.code).to.be.oneOf([200, 429]));",
+                  "if (pm.response.code === 429) {",
+                  "  pm.test('429 body is RATE_LIMIT_EXCEEDED', () => pm.expect(pm.response.json().code).to.eql('RATE_LIMIT_EXCEEDED'));",
+                  "  pm.test('Retry-After header present', () => pm.response.to.have.header('Retry-After'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userA}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rate-limit/user/ping",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rate-limit",
+                "user",
+                "ping"
+              ]
+            },
+            "description": "Send 4+ times quickly: 3 x 200 then 429 (burst 3)."
+          }
+        },
+        {
+          "name": "User B - ping (independent bucket)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const remaining = pm.response.headers.get('X-RateLimit-Remaining');",
+                  "const retry = pm.response.headers.get('Retry-After');",
+                  "console.log(`${pm.info.requestName} -> ${pm.response.code} | remaining=${remaining} | retry-after=${retry}`);",
+                  "pm.test('Status is 200 or 429', () => pm.expect(pm.response.code).to.be.oneOf([200, 429]));",
+                  "if (pm.response.code === 429) {",
+                  "  pm.test('429 body is RATE_LIMIT_EXCEEDED', () => pm.expect(pm.response.json().code).to.eql('RATE_LIMIT_EXCEEDED'));",
+                  "  pm.test('Retry-After header present', () => pm.response.to.have.header('Retry-After'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-User-Id",
+                "value": "{{userB}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rate-limit/user/ping",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rate-limit",
+                "user",
+                "ping"
+              ]
+            },
+            "description": "Still 200 while User A is limited: each user has its own bucket."
+          }
+        },
+        {
+          "name": "No X-User-Id -> 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Missing identity -> 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Code is RATE_LIMIT_IDENTITY_MISSING', () => pm.expect(pm.response.json().code).to.eql('RATE_LIMIT_IDENTITY_MISSING'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/rate-limit/user/ping",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rate-limit",
+                "user",
+                "ping"
+              ]
+            },
+            "description": "deny-empty-key=true, empty-key-status=UNAUTHORIZED."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Per IP",
+      "item": [
+        {
+          "name": "IP - ping",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const remaining = pm.response.headers.get('X-RateLimit-Remaining');",
+                  "const retry = pm.response.headers.get('Retry-After');",
+                  "console.log(`${pm.info.requestName} -> ${pm.response.code} | remaining=${remaining} | retry-after=${retry}`);",
+                  "pm.test('Status is 200 or 429', () => pm.expect(pm.response.code).to.be.oneOf([200, 429]));",
+                  "if (pm.response.code === 429) {",
+                  "  pm.test('429 body is RATE_LIMIT_EXCEEDED', () => pm.expect(pm.response.json().code).to.eql('RATE_LIMIT_EXCEEDED'));",
+                  "  pm.test('Retry-After header present', () => pm.response.to.have.header('Retry-After'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/rate-limit/ip/ping",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rate-limit",
+                "ip",
+                "ping"
+              ]
+            },
+            "description": "Key = client IP (TCP remote address, not X-Forwarded-For). Send 6+ times: 5 x 200 then 429."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Per API key (X-Api-Key)",
+      "item": [
+        {
+          "name": "API key partner-1 - ping",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const remaining = pm.response.headers.get('X-RateLimit-Remaining');",
+                  "const retry = pm.response.headers.get('Retry-After');",
+                  "console.log(`${pm.info.requestName} -> ${pm.response.code} | remaining=${remaining} | retry-after=${retry}`);",
+                  "pm.test('Status is 200 or 429', () => pm.expect(pm.response.code).to.be.oneOf([200, 429]));",
+                  "if (pm.response.code === 429) {",
+                  "  pm.test('429 body is RATE_LIMIT_EXCEEDED', () => pm.expect(pm.response.json().code).to.eql('RATE_LIMIT_EXCEEDED'));",
+                  "  pm.test('Retry-After header present', () => pm.response.to.have.header('Retry-After'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "partner-1-demo-key"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rate-limit/api-key/ping",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rate-limit",
+                "api-key",
+                "ping"
+              ]
+            },
+            "description": "Send 6+ times quickly: 5 x 200 then 429. Redis stores a SHA-256 fingerprint, not the raw key."
+          }
+        },
+        {
+          "name": "API key partner-2 - ping (independent bucket)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const remaining = pm.response.headers.get('X-RateLimit-Remaining');",
+                  "const retry = pm.response.headers.get('Retry-After');",
+                  "console.log(`${pm.info.requestName} -> ${pm.response.code} | remaining=${remaining} | retry-after=${retry}`);",
+                  "pm.test('Status is 200 or 429', () => pm.expect(pm.response.code).to.be.oneOf([200, 429]));",
+                  "if (pm.response.code === 429) {",
+                  "  pm.test('429 body is RATE_LIMIT_EXCEEDED', () => pm.expect(pm.response.json().code).to.eql('RATE_LIMIT_EXCEEDED'));",
+                  "  pm.test('Retry-After header present', () => pm.response.to.have.header('Retry-After'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "partner-2-demo-key"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rate-limit/api-key/ping",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rate-limit",
+                "api-key",
+                "ping"
+              ]
+            },
+            "description": "Different key -> different bucket."
+          }
+        },
+        {
+          "name": "No X-Api-Key -> 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Missing identity -> 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Code is RATE_LIMIT_IDENTITY_MISSING', () => pm.expect(pm.response.json().code).to.eql('RATE_LIMIT_IDENTITY_MISSING'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/rate-limit/api-key/ping",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rate-limit",
+                "api-key",
+                "ping"
+              ]
+            },
+            "description": "Missing API key is rejected."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Load balancer (lb://)",
+      "item": [
+        {
+          "name": "Showtimes - see X-Served-By",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const servedBy = pm.response.headers.get('X-Served-By');",
+                  "console.log(`${pm.response.code} | X-Served-By=${servedBy}`);",
+                  "pm.test('Has X-Served-By (instance chosen by load balancer)', () => pm.response.to.have.header('X-Served-By'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/showtimes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "showtimes"
+              ]
+            },
+            "description": "Run 2+ showtime-service instances, then Send several times (or Runner, 6 iterations): X-Served-By alternates between instances (round-robin). Stop one instance: GET requests are retried on the remaining one."
+          }
+        }
+      ]
+    }
+  ]
+}

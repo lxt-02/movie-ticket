@@ -9,19 +9,29 @@ import reactor.core.publisher.Mono;
 
 import java.security.Principal;
 
+/**
+ * Per-user key: {@code rl:user:{userId}:{routeId}}.
+ * <p>
+ * Identity source, in order:
+ * <ol>
+ *   <li>Authenticated principal (production, once JWT is integrated).</li>
+ *   <li>{@code X-User-Id} header, only when {@code app.rate-limit.trust-user-id-header=true} (dev/demo).</li>
+ * </ol>
+ * No identity returns an empty key, so the route rejects the request (deny-empty-key -> 401)
+ * instead of silently falling back to another bucket.
+ */
 @Component("userKeyResolver")
-@Primary
+@Primary // Spring Cloud Gateway injects one default KeyResolver by type
 public class UserKeyResolver implements KeyResolver {
 
-    private static final String DEFAULT_SCOPE = "general-api";
     private static final String USER_ID_HEADER = "X-User-Id";
 
-    private final IpKeyResolver ipKeyResolver;
     private final RateLimitKeyFactory keyFactory;
+    private final RateLimitProperties properties;
 
-    public UserKeyResolver(IpKeyResolver ipKeyResolver, RateLimitKeyFactory keyFactory) {
-        this.ipKeyResolver = ipKeyResolver;
+    public UserKeyResolver(RateLimitKeyFactory keyFactory, RateLimitProperties properties) {
         this.keyFactory = keyFactory;
+        this.properties = properties;
     }
 
     @Override
@@ -29,16 +39,15 @@ public class UserKeyResolver implements KeyResolver {
         return exchange.getPrincipal()
                 .map(Principal::getName)
                 .filter(StringUtils::hasText)
-                .map(userId -> keyFactory.userKey(userId, DEFAULT_SCOPE))
-                .switchIfEmpty(resolveDevelopmentUser(exchange))
-                .switchIfEmpty(ipKeyResolver.resolve(exchange));
+                .switchIfEmpty(Mono.defer(() -> resolveDevelopmentUser(exchange)))
+                .map(userId -> keyFactory.userKey(userId, exchange));
     }
 
     private Mono<String> resolveDevelopmentUser(ServerWebExchange exchange) {
-        String userId = exchange.getRequest().getHeaders().getFirst(USER_ID_HEADER);
-        if (!StringUtils.hasText(userId)) {
+        if (!properties.isTrustUserIdHeader()) {
             return Mono.empty();
         }
-        return Mono.just(keyFactory.userKey(userId, DEFAULT_SCOPE));
+        String userId = exchange.getRequest().getHeaders().getFirst(USER_ID_HEADER);
+        return StringUtils.hasText(userId) ? Mono.just(userId) : Mono.empty();
     }
 }
