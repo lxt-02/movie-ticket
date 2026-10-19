@@ -7,14 +7,22 @@ import java.util.UUID;
 public interface ShowtimeClientPort {
     /**
      * Outbound contract to request seat holds from Showtime service.
-     * OpenFeign or HTTP/Saga implementation to be attached later.
+     * Idempotent by bookingId: Showtime returns the existing hold when the same bookingId
+     * is retried with the same seats. The client's Idempotency-Key is NOT forwarded.
      */
-    SeatHoldResult holdSeats(UUID showtimeId, UUID bookingId, List<UUID> showtimeSeatIds, String idempotencyKey);
+    SeatHoldResult holdSeats(UUID showtimeId, UUID bookingId, List<UUID> showtimeSeatIds);
 
     SeatHoldResult getHoldByBookingId(UUID bookingId);
 
     SeatHoldResult releaseHold(UUID holdId);
 
+    /**
+     * Turns the held seats into BOOKED.
+     *
+     * @throws com.mv.bookingservice.application.exception.SeatHoldRejectedException if Showtime refuses for good
+     *         (hold released/expired, seats taken): do not retry, refund instead
+     * @throws RuntimeException any other failure (timeout, 5xx) is temporary and may be retried
+     */
     SeatHoldResult confirmHold(UUID holdId);
 
     record SeatHoldResult(

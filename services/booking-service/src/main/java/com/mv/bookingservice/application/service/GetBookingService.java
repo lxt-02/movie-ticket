@@ -26,21 +26,30 @@ public class GetBookingService implements GetBookingUseCase {
         Booking booking = loadBookingPort.findById(query.getBookingId())
                 .orElseThrow(() -> new BookingNotFoundException(query.getBookingId()));
 
-        if (query.getUserId() != null && !query.getUserId().equals(booking.getUserId())) {
-            throw new BookingValidationException("Access denied to requested booking");
-        }
-
+        requireOwner(booking, query.getUserId());
         return booking;
     }
 
     @Override
     public Booking getByCode(GetBookingByCodeQuery query) {
-        return loadBookingPort.findByBookingCode(query.getBookingCode())
+        Booking booking = loadBookingPort.findByBookingCode(query.getBookingCode())
                 .orElseThrow(() -> new BookingNotFoundException(query.getBookingCode()));
+        requireOwner(booking, query.getUserId());
+        return booking;
     }
 
     @Override
     public List<Booking> getByUserId(GetUserBookingsQuery query) {
+        if (query.getUserId() == null) {
+            throw new BookingValidationException("userId is required");
+        }
         return loadBookingPort.findByUserId(query.getUserId());
+    }
+
+    /** A missing caller is denied too; someone else's booking looks like "not found" so ids cannot be probed. */
+    private void requireOwner(Booking booking, java.util.UUID userId) {
+        if (userId == null || !userId.equals(booking.getUserId())) {
+            throw new BookingNotFoundException(booking.getId());
+        }
     }
 }

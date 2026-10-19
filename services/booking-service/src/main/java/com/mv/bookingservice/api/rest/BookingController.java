@@ -24,7 +24,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -44,7 +43,7 @@ public class BookingController {
     @PostMapping
     public ResponseEntity<ApiResponse<BookingResponse>> createBooking(
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
-            @RequestHeader(value = "X-User-Id", required = false) UUID headerUserId,
+            @RequestHeader(value = "X-User-Id") UUID headerUserId,
             @Valid @RequestBody CreateBookingRequest request
     ) {
         CreateBookingCommand command = bookingDtoMapper.toCommand(request, headerUserId, idempotencyKey);
@@ -56,7 +55,7 @@ public class BookingController {
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<BookingResponse>> getBookingById(
             @PathVariable UUID id,
-            @RequestHeader(value = "X-User-Id", required = false) UUID headerUserId
+            @RequestHeader(value = "X-User-Id") UUID headerUserId
     ) {
         GetBookingQuery query = GetBookingQuery.builder()
                 .bookingId(id)
@@ -69,10 +68,12 @@ public class BookingController {
 
     @GetMapping("/code/{bookingCode}")
     public ResponseEntity<ApiResponse<BookingResponse>> getBookingByCode(
-            @PathVariable String bookingCode
+            @PathVariable String bookingCode,
+            @RequestHeader(value = "X-User-Id") UUID headerUserId
     ) {
         GetBookingByCodeQuery query = GetBookingByCodeQuery.builder()
                 .bookingCode(bookingCode)
+                .userId(headerUserId)
                 .build();
         Booking booking = getBookingUseCase.getByCode(query);
         BookingResponse response = bookingDtoMapper.toResponse(booking);
@@ -81,16 +82,11 @@ public class BookingController {
 
     @GetMapping
     public ResponseEntity<ApiResponse<List<BookingResponse>>> getUserBookings(
-            @RequestHeader(value = "X-User-Id", required = false) UUID headerUserId,
-            @RequestParam(value = "userId", required = false) UUID paramUserId
+            @RequestHeader(value = "X-User-Id") UUID headerUserId
     ) {
-        UUID userId = headerUserId != null ? headerUserId : paramUserId;
-        if (userId == null) {
-            throw new IllegalArgumentException("User ID must be provided via X-User-Id header or userId query parameter");
-        }
-
+        // Only the caller's own bookings: no ?userId= override.
         GetUserBookingsQuery query = GetUserBookingsQuery.builder()
-                .userId(userId)
+                .userId(headerUserId)
                 .build();
         List<Booking> bookings = getBookingUseCase.getByUserId(query);
         List<BookingResponse> responses = bookings.stream()
@@ -102,7 +98,7 @@ public class BookingController {
     @PostMapping("/{id}/cancel")
     public ResponseEntity<ApiResponse<BookingResponse>> cancelBooking(
             @PathVariable UUID id,
-            @RequestHeader(value = "X-User-Id", required = false) UUID headerUserId,
+            @RequestHeader(value = "X-User-Id") UUID headerUserId,
             @RequestBody(required = false) CancelBookingRequest request
     ) {
         CancelBookingCommand command = CancelBookingCommand.builder()

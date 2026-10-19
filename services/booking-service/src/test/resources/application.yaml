@@ -10,3 +10,12 @@ spring:
     database-platform: org.hibernate.dialect.H2Dialect
   flyway:
     enabled: false
+  kafka:
+    bootstrap-servers: localhost:9092
+    listener:
+      # No broker in unit tests: do not start the payment-events consumer.
+      auto-startup: false
+
+booking:
+  scheduling:
+    enabled: false
