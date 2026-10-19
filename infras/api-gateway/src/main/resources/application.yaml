@@ -1,10 +1,47 @@
 spring:
+  config:
+    import:
+      # Load variables from this module's .env (run from module dir or from project root)
+      - optional:file:.env[.properties]
+      - optional:file:infras/api-gateway/.env[.properties]
   application:
     name: api-gateway
   cloud:
     gateway:
       server:
         webflux:
+          # CORS for the browser frontend (Next.js on http://localhost:3000).
+          # Handled by the gateway only; services must not add their own CORS headers.
+          globalcors:
+            # Also answer preflight (OPTIONS) for paths that do not match a route.
+            add-to-simple-url-handler-mapping: true
+            cors-configurations:
+              '[/**]':
+                # Comma-separated list, e.g. http://localhost:3000,https://mss301.example.com
+                allowed-origins: ${GATEWAY_CORS_ALLOWED_ORIGINS:http://localhost:3000}
+                allowed-methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+                allowed-headers: Content-Type,Authorization,X-User-Id,Idempotency-Key,X-Api-Key
+                # Response headers the frontend JavaScript is allowed to read.
+                exposed-headers: Retry-After,X-RateLimit-Remaining,X-RateLimit-Burst-Capacity,X-RateLimit-Replenish-Rate,X-RateLimit-Requested-Tokens,X-Served-By
+                allow-credentials: false
+                max-age: 3600
+          default-filters:
+            # Safety net: if a downstream service ever adds CORS headers too, keep only one copy.
+            - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_FIRST
+            # Load-balancer failover: if the chosen instance is down / unreachable, retry the
+            # request; each retry goes through lb:// again, so it can land on another instance.
+            # Only idempotent GET requests are retried (never POST bookings/payments).
+            - name: Retry
+              args:
+                retries: ${GATEWAY_RETRY_ATTEMPTS}
+                methods: GET
+                statuses: BAD_GATEWAY,SERVICE_UNAVAILABLE,GATEWAY_TIMEOUT
+                exceptions: java.io.IOException,java.util.concurrent.TimeoutException
+                backoff:
+                  firstBackoff: 50ms
+                  maxBackoff: 500ms
+                  factor: 2
+                  basedOnPreviousValue: false
           routes:
             # --- Rate-limit demo routes (all forward to PingController) ---
             # Each route picks its own KeyResolver + RedisRateLimiter by bean name.
@@ -50,76 +87,76 @@ spring:
                     empty-key-status: UNAUTHORIZED
 
             # --- Service routes (no rate limit) ---
-            - id: user-service
-              uri: lb://user-service
-              predicates:
-                - Path=/internal/users/**
+            # /internal/** endpoints are service-to-service only (Feign via Eureka) and are NOT routed here:
+            # exposing them let anyone confirm bookings, hold/release seats or read user data.
+            # The cinema/movie catalogue stays reachable read-only (GET) until it gets public /api/v1 endpoints.
             - id: showtime-public-service
               uri: lb://showtime-service
               predicates:
                 - Path=/api/v1/showtimes,/api/v1/showtimes/**
-            - id: showtime-internal-service
-              uri: lb://showtime-service
-              predicates:
-                - Path=/internal/showtimes/**,/internal/holds/**
             - id: booking-public-service
               uri: lb://booking-service
               predicates:
                 - Path=/api/v1/bookings,/api/v1/bookings/**
-            - id: booking-internal-service
-              uri: lb://booking-service
-              predicates:
-                - Path=/internal/bookings/**
             - id: payment-public-service
               uri: lb://payment-service
               predicates:
                 - Path=/api/v1/payments,/api/v1/payments/**
-            - id: payment-internal-service
-              uri: lb://payment-service
-              predicates:
-                - Path=/internal/payments/**
             - id: cinema-service-cinemas
               uri: lb://cinema-service
               predicates:
                 - Path=/internal/cinemas/**
+                - Method=GET
             - id: cinema-service-screens
               uri: lb://cinema-service
               predicates:
                 - Path=/internal/screens/**
+                - Method=GET
             - id: movie-service
               uri: lb://movie-service
               predicates:
                 - Path=/internal/movies/**
+                - Method=GET
+    loadbalancer:
+      # Instance list cache: lower TTL so new / stopped Docker instances are noticed quickly.
+      cache:
+        enabled: true
+        ttl: ${LOADBALANCER_CACHE_TTL}
   data:
     redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
       # If Redis is down, the limiter fails open (request allowed, X-RateLimit-Remaining: -1)
       # after this timeout instead of hanging.
-      timeout: ${REDIS_TIMEOUT:2s}
+      timeout: ${REDIS_TIMEOUT}
 
 app:
+  load-balancer:
+    # round-robin (default) | random
+    strategy: ${LOADBALANCER_STRATEGY}
+    # Adds X-Served-By (chosen instance ID) to responses of lb:// routes, for the demo.
+    served-by-header: ${LOADBALANCER_SERVED_BY_HEADER}
   rate-limit:
-    # DEV/DEMO ONLY: trust X-User-Id as caller identity (no login yet).
-    # Set to false in production; the user ID must come from a validated JWT.
-    trust-user-id-header: ${RATE_LIMIT_TRUST_USER_ID_HEADER:true}
     # Number of load balancers / reverse proxies in front of the Gateway.
     # 0 = exposed directly (use TCP remote address). Set to 1 when running behind one LB (e.g. nginx).
-    trusted-proxy-hops: ${RATE_LIMIT_TRUSTED_PROXY_HOPS:0}
+    trusted-proxy-hops: ${RATE_LIMIT_TRUSTED_PROXY_HOPS}
+    # DEV/DEMO ONLY: trust X-User-Id as caller identity (no login yet).
+    # Set to false in production; the user ID must come from a validated JWT.
+    trust-user-id-header: ${RATE_LIMIT_TRUST_USER_ID_HEADER}
     # Token Bucket policies: replenish-rate = tokens/second, burst-capacity = bucket size,
     # requested-tokens = tokens consumed per request.
     user:
-      replenish-rate: ${RATE_LIMIT_USER_REPLENISH_RATE:1}
-      burst-capacity: ${RATE_LIMIT_USER_BURST_CAPACITY:3}
-      requested-tokens: ${RATE_LIMIT_USER_REQUESTED_TOKENS:1}
+      replenish-rate: ${RATE_LIMIT_USER_REPLENISH_RATE}
+      burst-capacity: ${RATE_LIMIT_USER_BURST_CAPACITY}
+      requested-tokens: ${RATE_LIMIT_USER_REQUESTED_TOKENS}
     ip:
-      replenish-rate: ${RATE_LIMIT_IP_REPLENISH_RATE:1}
-      burst-capacity: ${RATE_LIMIT_IP_BURST_CAPACITY:5}
-      requested-tokens: ${RATE_LIMIT_IP_REQUESTED_TOKENS:1}
+      replenish-rate: ${RATE_LIMIT_IP_REPLENISH_RATE}
+      burst-capacity: ${RATE_LIMIT_IP_BURST_CAPACITY}
+      requested-tokens: ${RATE_LIMIT_IP_REQUESTED_TOKENS}
     api-key:
-      replenish-rate: ${RATE_LIMIT_API_KEY_REPLENISH_RATE:2}
-      burst-capacity: ${RATE_LIMIT_API_KEY_BURST_CAPACITY:5}
-      requested-tokens: ${RATE_LIMIT_API_KEY_REQUESTED_TOKENS:1}
+      replenish-rate: ${RATE_LIMIT_API_KEY_REPLENISH_RATE}
+      burst-capacity: ${RATE_LIMIT_API_KEY_BURST_CAPACITY}
+      requested-tokens: ${RATE_LIMIT_API_KEY_REQUESTED_TOKENS}
 
 server:
   port: 8080
@@ -127,10 +164,13 @@ server:
 eureka:
   client:
     service-url:
-      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE:http://localhost:8761/eureka/}
+      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE}
+    # Fetch the registry more often than the 30s default so scaled instances appear quickly.
+    registry-fetch-interval-seconds: ${EUREKA_REGISTRY_FETCH_INTERVAL}
   instance:
     prefer-ip-address: true
-    instance-id: ${spring.application.name}:${server.port}
+    # Include the IP so several Gateway containers on the same port get distinct instance IDs.
+    instance-id: ${EUREKA_INSTANCE_ID:${spring.application.name}:${spring.cloud.client.ip-address}:${server.port}}
 
 management:
   endpoints:
