@@ -20,14 +20,19 @@ public class PaymentResponse {
     private UUID id;
     private UUID bookingId;
     private UUID userId;
+    private String paymentCode;
     private String provider;
-    private String providerTransactionId;
+    private String paymentMethod;
+    private PaymentStatus status;
     private BigDecimal amount;
     private String currency;
-    private PaymentStatus status;
-    private String paymentUrl;
+    private String checkoutUrl;
+    private String qrCode;
+    private Long payosOrderCode;
+    private String gatewayTransactionId;
+    private String failureReason;
     private Instant paidAt;
-    private Instant expiresAt;
+    private Instant expiredAt;
     private Instant createdAt;
     private Instant updatedAt;
 }

@@ -12,6 +12,8 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -35,36 +37,49 @@ public class PaymentEntity {
     @Column(name = "user_id", nullable = false)
     private UUID userId;
 
-    @Column(name = "provider", nullable = false, length = 50)
-    private String provider;
+    @Column(name = "payment_code", nullable = false, unique = true, length = 64)
+    private String paymentCode;
 
-    @Column(name = "provider_transaction_id", unique = true, length = 150)
-    private String providerTransactionId;
-
-    @Column(name = "amount", nullable = false, precision = 12, scale = 2)
-    private BigDecimal amount;
-
-    @Column(name = "currency", nullable = false, length = 10)
-    private String currency;
+    @Column(name = "payment_method", nullable = false, length = 32)
+    private String paymentMethod;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false, length = 30)
-    private PaymentStatus status;
+    @JdbcTypeCode(SqlTypes.VARCHAR)
+    @Column(name = "payment_status", nullable = false, length = 32)
+    private PaymentStatus paymentStatus;
 
-    @Column(name = "payment_url")
-    private String paymentUrl;
+    @Column(name = "amount", nullable = false, precision = 19, scale = 2)
+    private BigDecimal amount;
 
-    @Column(name = "idempotency_key", length = 150)
+    @Column(name = "currency", nullable = false, length = 3)
+    private String currency;
+
+    @Column(name = "checkout_url", length = 1024)
+    private String checkoutUrl;
+
+    @Column(name = "qr_code", length = 1024)
+    private String qrCode;
+
+    @Column(name = "gateway_provider", nullable = false, length = 32)
+    private String gatewayProvider;
+
+    @Column(name = "payos_order_code", unique = true)
+    private Long payosOrderCode;
+
+    @Column(name = "gateway_transaction_id", length = 255)
+    private String gatewayTransactionId;
+
+    @Column(name = "idempotency_key", unique = true, length = 255)
     private String idempotencyKey;
 
-    @Column(name = "request_hash", length = 64)
-    private String requestHash;
+    @Column(name = "failure_reason", length = 1000)
+    private String failureReason;
 
     @Column(name = "paid_at")
     private Instant paidAt;
 
-    @Column(name = "expires_at")
-    private Instant expiresAt;
+    @Column(name = "expired_at")
+    private Instant expiredAt;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

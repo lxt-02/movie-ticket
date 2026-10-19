@@ -2,12 +2,17 @@ server:
   port: 8086
 
 spring:
+  config:
+    import:
+      # Load variables from this module's .env (run from module dir or from project root)
+      - optional:file:.env[.properties]
+      - optional:file:services/payment-service/.env[.properties]
   application:
     name: payment-service
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/movie_booking_payment?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
-    username: ${SPRING_DATASOURCE_USERNAME:root}
-    password: ${SPRING_DATASOURCE_PASSWORD:12345}
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     hibernate:
@@ -23,20 +28,66 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+    consumer:
+      group-id: payment-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+# PayOS credentials come from the environment (.env locally). Never commit real keys.
+payos:
+  client-id: ${PAYOS_CLIENT_ID:}
+  api-key: ${PAYOS_API_KEY:}
+  checksum-key: ${PAYOS_CHECKSUM_KEY:}
+  base-url: ${PAYOS_BASE_URL:https://api-merchant.payos.vn}
+  return-url: ${PAYOS_RETURN_URL:http://localhost:3000/payment/success}
+  cancel-url: ${PAYOS_CANCEL_URL:http://localhost:3000/payment/cancel}
+  payment-expiration-minutes: ${PAYOS_PAYMENT_EXPIRATION_MINUTES:15}
+  connect-timeout-ms: 5000
+  read-timeout-ms: 15000
+
+payment:
+  kafka:
+    payment-commands: payment-commands
+    payment-events: payment-events
+    partitions: 3
+  scheduling:
+    enabled: true
+  expiration-batch-size: 100
+  expiration-scan-delay-ms: 60000
+  expiration-scan-initial-delay-ms: 60000
+  # Lost-webhook safety net: PENDING payments older than min-age are checked against PayOS.
+  reconcile:
+    delay-ms: 60000
+    initial-delay-ms: 30000
+    min-age-seconds: 60
+    batch-size: 50
+  outbox:
+    relay-delay-ms: 10000
+    relay-initial-delay-ms: 1000
+    batch-size: 50
+    max-attempts: 10
+    publish-timeout-ms: 5000
+    retry-delay-ms: 5000
+    stale-publishing-timeout-ms: 120000
 
 logging:
   level:
     com.mv.paymentservice: DEBUG
     org.springframework.web: INFO
 
-clients:
-  booking:
-    base-url: ${BOOKING_SERVICE_URL:}
-
 eureka:
   client:
     service-url:
-      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE:http://localhost:8761/eureka/}
+      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE}
   instance:
     prefer-ip-address: true
     instance-id: ${spring.application.name}:${server.port}
