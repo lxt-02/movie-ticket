@@ -55,4 +55,25 @@ public class ShowtimeSeat {
         // If seat was HELD but the lock has expired, it can be reclaimed once old hold is handled
         return status == ShowtimeSeatStatus.HELD && lockedUntil != null && Instant.now().isAfter(lockedUntil);
     }
+
+    /** Sold, or held by a hold that has not expired yet: someone is paying for / owns this seat. */
+    public boolean isTaken(Instant now) {
+        return status == ShowtimeSeatStatus.BOOKED
+                || (status == ShowtimeSeatStatus.HELD && lockedUntil != null && lockedUntil.isAfter(now));
+    }
+
+    /** Status shown to buyers: an expired hold is shown as AVAILABLE (it is reclaimed on the next hold). */
+    public ShowtimeSeatStatus displayStatus(Instant now) {
+        if (status == ShowtimeSeatStatus.HELD && (lockedUntil == null || !lockedUntil.isAfter(now))) {
+            return ShowtimeSeatStatus.AVAILABLE;
+        }
+        return status;
+    }
+
+    /** Takes the seat out of sale (showtime cancelled). */
+    public void block() {
+        this.status = ShowtimeSeatStatus.BLOCKED;
+        this.holdId = null;
+        this.lockedUntil = null;
+    }
 }

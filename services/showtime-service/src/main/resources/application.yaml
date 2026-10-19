@@ -54,3 +54,8 @@ eureka:
   instance:
     prefer-ip-address: true
     instance-id: ${spring.application.name}:${server.port}
+
+showtime:
+  schedule:
+    # Minimum gap between two showtimes of the same screen (cleaning, ads, entry/exit).
+    cleaning-buffer-minutes: 15

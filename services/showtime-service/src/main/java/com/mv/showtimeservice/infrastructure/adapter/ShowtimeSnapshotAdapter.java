@@ -46,4 +46,9 @@ public class ShowtimeSnapshotAdapter implements ShowtimeSnapshotPort {
                 .updatedAt(Instant.now())
                 .build());
     }
+
+    @Override
+    public void lockScreen(java.util.UUID screenId) {
+        screenSnapshotJpaRepository.findByIdForUpdate(screenId);
+    }
 }
