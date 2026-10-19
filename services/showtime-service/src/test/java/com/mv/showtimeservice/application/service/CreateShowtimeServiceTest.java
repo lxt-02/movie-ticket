@@ -1,6 +1,7 @@
 package com.mv.showtimeservice.application.service;
 
 import com.mv.showtimeservice.application.command.CreateShowtimeCommand;
+import com.mv.showtimeservice.application.dto.ShowtimeSchedulePolicy;
 import com.mv.showtimeservice.application.port.out.CinemaClientPort;
 import com.mv.showtimeservice.application.port.out.MovieClientPort;
 import com.mv.showtimeservice.application.port.out.ShowtimeRepositoryPort;
@@ -57,7 +58,8 @@ class CreateShowtimeServiceTest {
                 cinemaClientPort,
                 showtimeSnapshotPort,
                 showtimeRepositoryPort,
-                showtimeSeatRepositoryPort
+                showtimeSeatRepositoryPort,
+                new ShowtimeSchedulePolicy(java.time.Duration.ofMinutes(15))
         );
     }
 
