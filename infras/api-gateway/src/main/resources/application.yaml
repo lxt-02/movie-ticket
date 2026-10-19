@@ -20,7 +20,7 @@ spring:
                 # Comma-separated list, e.g. http://localhost:3000,https://mss301.example.com
                 allowed-origins: ${GATEWAY_CORS_ALLOWED_ORIGINS:http://localhost:3000}
                 allowed-methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
-                allowed-headers: Content-Type,Authorization,X-User-Id,Idempotency-Key,X-Api-Key
+                allowed-headers: Content-Type,Authorization,X-User-Id,X-User-Role,Idempotency-Key,X-Api-Key
                 # Response headers the frontend JavaScript is allowed to read.
                 exposed-headers: Retry-After,X-RateLimit-Remaining,X-RateLimit-Burst-Capacity,X-RateLimit-Replenish-Rate,X-RateLimit-Requested-Tokens,X-Served-By
                 allow-credentials: false
@@ -89,7 +89,6 @@ spring:
             # --- Service routes (no rate limit) ---
             # /internal/** endpoints are service-to-service only (Feign via Eureka) and are NOT routed here:
             # exposing them let anyone confirm bookings, hold/release seats or read user data.
-            # The cinema/movie catalogue stays reachable read-only (GET) until it gets public /api/v1 endpoints.
             - id: showtime-public-service
               uri: lb://showtime-service
               predicates:
@@ -102,6 +101,17 @@ spring:
               uri: lb://payment-service
               predicates:
                 - Path=/api/v1/payments,/api/v1/payments/**
+            # Catalogue: public GET, writes need X-User-Role: ADMIN (checked by each service).
+            - id: movie-public-service
+              uri: lb://movie-service
+              predicates:
+                - Path=/api/v1/movies,/api/v1/movies/**
+            - id: cinema-public-service
+              uri: lb://cinema-service
+              predicates:
+                - Path=/api/v1/cinemas,/api/v1/cinemas/**
+            # DEPRECATED: read-only internal catalogue routes kept so the current frontend keeps working.
+            # Replaced by /api/v1/movies, /api/v1/cinemas, /api/v1/showtimes/{id}/seats; remove once FE switched.
             - id: cinema-service-cinemas
               uri: lb://cinema-service
               predicates:
