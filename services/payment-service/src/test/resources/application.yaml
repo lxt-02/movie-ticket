@@ -11,3 +11,23 @@ spring:
     show-sql: true
   flyway:
     enabled: false
+  kafka:
+    bootstrap-servers: localhost:9092
+    listener:
+      # No broker in unit tests: do not start the payment-commands consumer.
+      auto-startup: false
+    admin:
+      auto-create: false
+
+payos:
+  client-id: test-client
+  api-key: test-api-key
+  checksum-key: test-checksum-key
+
+payment:
+  scheduling:
+    enabled: false
+
+eureka:
+  client:
+    enabled: false
