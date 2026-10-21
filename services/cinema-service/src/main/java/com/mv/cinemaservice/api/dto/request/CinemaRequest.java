@@ -17,24 +17,24 @@ import lombok.Setter;
 @AllArgsConstructor
 public class CinemaRequest {
 
-    @NotBlank(message = "name is required")
-    @Size(max = 255, message = "name must be at most 255 characters")
+    @NotBlank(message = "Tên là bắt buộc")
+    @Size(max = 255, message = "Tên tối đa 255 ký tự")
     private String name;
 
-    @Size(max = 100, message = "brand must be at most 100 characters")
+    @Size(max = 100, message = "Thương hiệu tối đa 100 ký tự")
     private String brand;
 
-    @NotBlank(message = "address is required")
+    @NotBlank(message = "Địa chỉ là bắt buộc")
     private String address;
 
-    @NotBlank(message = "city is required")
-    @Size(max = 100, message = "city must be at most 100 characters")
+    @NotBlank(message = "Thành phố là bắt buộc")
+    @Size(max = 100, message = "Thành phố tối đa 100 ký tự")
     private String city;
 
-    @Size(max = 100, message = "district must be at most 100 characters")
+    @Size(max = 100, message = "Quận / huyện tối đa 100 ký tự")
     private String district;
 
-    @Size(max = 30, message = "phone must be at most 30 characters")
+    @Size(max = 30, message = "Số điện thoại tối đa 30 ký tự")
     private String phone;
 
     /** Create only: ACTIVE (default) or INACTIVE. Ignored on update; use PATCH /status. */
