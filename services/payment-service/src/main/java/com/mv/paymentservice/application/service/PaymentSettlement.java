@@ -63,8 +63,8 @@ public class PaymentSettlement {
             }
             case LATE_PAID -> {
                 savePaymentPort.save(payment);
-                // Money arrived for a closed link (booking cancelled / expired / replaced). No refund flow in this
-                // system: the status stays as it is and the case is only logged for manual handling.
+                // Money arrived for a closed link (booking cancelled / expired / replaced): the status stays as it
+                // is and the case is only logged for manual handling.
                 log.warn("LATE PAID: payment {} (booking {}) received money while {}; handle manually",
                         payment.getId(), payment.getBookingId(), payment.getStatus());
             }
