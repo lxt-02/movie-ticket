@@ -4,6 +4,8 @@ import com.mv.cinemaservice.domain.model.cinema.exception.CinemaNotFoundExceptio
 import com.mv.cinemaservice.domain.model.screen.exception.ScreenNotFoundException;
 import com.mv.cinemaservice.api.security.ForbiddenException;
 import com.mv.cinemaservice.domain.model.cinema.exception.InvalidCinemaException;
+import com.mv.cinemaservice.domain.model.screen.exception.InvalidScreenException;
+import com.mv.cinemaservice.domain.model.screen.exception.ScreenConflictException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -42,7 +44,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex, HttpServletRequest request) {
         Map<String, String> errors = new HashMap<>();
         ex.getBindingResult().getFieldErrors().forEach(e -> errors.put(e.getField(), e.getDefaultMessage()));
-        return error(HttpStatus.BAD_REQUEST, "Validation failed", request, errors);
+        return error(HttpStatus.BAD_REQUEST, "Dữ liệu gửi lên không hợp lệ", request, errors);
     }
 
     /** Malformed JSON, unknown enum value, wrong type in a query parameter. */
@@ -51,9 +53,14 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.BAD_REQUEST, "Malformed request: " + ex.getMessage(), request, null);
     }
 
-    @ExceptionHandler(InvalidCinemaException.class)
-    public ResponseEntity<ErrorResponse> handleInvalidCinema(InvalidCinemaException ex, HttpServletRequest request) {
+    @ExceptionHandler({InvalidCinemaException.class, InvalidScreenException.class})
+    public ResponseEntity<ErrorResponse> handleInvalidCinema(RuntimeException ex, HttpServletRequest request) {
         return error(HttpStatus.BAD_REQUEST, ex.getMessage(), request, null);
+    }
+
+    @ExceptionHandler(ScreenConflictException.class)
+    public ResponseEntity<ErrorResponse> handleScreenConflict(ScreenConflictException ex, HttpServletRequest request) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), request, null);
     }
 
     private ResponseEntity<ErrorResponse> error(HttpStatus status, String message, HttpServletRequest request,
@@ -85,11 +92,12 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGeneralException(Exception ex, HttpServletRequest request) {
+        org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class).error("Unhandled exception on {}", request.getRequestURI(), ex);
         ErrorResponse response = ErrorResponse.builder()
                 .success(false)
                 .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
                 .error(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase())
-                .message(ex.getMessage() != null ? ex.getMessage() : "An unexpected error occurred")
+                .message(CommonExceptionHandler.GENERIC_ERROR)
                 .path(request.getRequestURI())
                 .timestamp(Instant.now())
                 .build();
