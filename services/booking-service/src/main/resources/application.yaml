@@ -103,7 +103,7 @@ booking:
   confirmation-retry:
     delay-ms: 60000
     initial-delay-ms: 45000
-    # A paid booking whose seats still are not confirmed after this long is CANCELLED (no refund flow).
+    # A paid booking whose seats still are not confirmed after this long is CANCELLED (logged for manual check).
     timeout-minutes: 30
   kafka:
     payment-commands: payment-commands

@@ -173,7 +173,7 @@ class BookingMaintenanceServiceTest {
     }
 
     @Test
-    void paymentAfterDeadlineIsFlaggedForRefundAndBookingExpires() {
+    void paymentAfterDeadlineIsNotUsedAndBookingExpires() {
         Booking overdue = booking(BookingStatus.PENDING, Instant.now().minusSeconds(120));
         when(loadBookingPort.findOverduePendingForUpdate(any(), eq(50))).thenReturn(List.of(overdue));
         when(paymentStatusPort.findSucceededPayment(overdue.getId())).thenReturn(Optional.of(
@@ -183,6 +183,5 @@ class BookingMaintenanceServiceTest {
 
         assertEquals(1, service.expireOverdueBookings());
         assertEquals(BookingStatus.EXPIRED, overdue.getStatus());
-        assertTrue(overdue.isNeedsRefund());
     }
 }

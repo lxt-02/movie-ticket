@@ -49,12 +49,6 @@ public class Booking {
     private Instant updatedAt;
     /** 1 for the first payment link; incremented by each "pay again". */
     private Integer paymentAttempt;
-    /**
-     * Money was received that this booking cannot use (paid late / twice / wrong amount, seats lost after payment).
-     * No refund flow in this system: the flag lists the case for manual handling.
-     */
-    private boolean needsRefund;
-    private String refundNote;
 
     @Builder.Default
     private List<BookingSeat> seats = new ArrayList<>();
@@ -275,7 +269,7 @@ public class Booking {
 
     /**
      * Paid, but the seats could not be booked (hold expired / seats lost / Showtime down too long):
-     * CONFIRMING -> CANCELLED. There is no refund flow; the payment stays SUCCESS and the case is handled manually.
+     * CONFIRMING -> CANCELLED. The payment stays SUCCESS; the case is logged (MANUAL CHECK).
      */
     public void failAfterPayment() {
         if (status != BookingStatus.CONFIRMING) {
@@ -285,16 +279,6 @@ public class Booking {
         this.cancelledAt = Instant.now();
         this.updatedAt = Instant.now();
         this.seats.forEach(BookingSeat::cancel);
-    }
-
-    /**
-     * Marks money that this booking cannot use, for manual refund. Does not change the status and does not touch
-     * {@code updatedAt} (the CONFIRMING timeout is measured from it).
-     */
-    public void flagForRefund(String note) {
-        this.needsRefund = true;
-        String text = note == null ? "" : note;
-        this.refundNote = text.length() > 500 ? text.substring(0, 500) : text;
     }
 
     public boolean isExpired() {

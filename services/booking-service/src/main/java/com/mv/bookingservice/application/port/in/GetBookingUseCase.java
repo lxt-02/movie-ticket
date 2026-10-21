@@ -13,7 +13,4 @@ public interface GetBookingUseCase {
     Booking getByCode(GetBookingByCodeQuery query);
 
     List<Booking> getByUserId(GetUserBookingsQuery query);
-
-    /** Bookings flagged {@code needs_refund} (money received but not usable), newest first. Admin / staff only. */
-    List<Booking> getNeedingRefund();
 }
