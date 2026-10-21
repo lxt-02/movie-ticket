@@ -127,17 +127,17 @@ public class CreatePaymentService implements CreatePaymentUseCase {
 
     private void validate(CreatePaymentCommand command) {
         if (command == null) {
-            throw new InvalidPaymentException("CREATE_PAYMENT command must not be null");
+            throw new InvalidPaymentException("Thiếu dữ liệu tạo thanh toán");
         }
         if (command.getBookingId() == null) {
-            throw new InvalidPaymentException("bookingId is required");
+            throw new InvalidPaymentException("Mã booking là bắt buộc");
         }
         if (command.getUserId() == null) {
-            throw new InvalidPaymentException("userId is required");
+            throw new InvalidPaymentException("Người dùng là bắt buộc");
         }
         String provider = command.getProvider();
         if (provider != null && !provider.isBlank() && !Payment.PROVIDER_PAYOS.equalsIgnoreCase(provider.trim())) {
-            throw new InvalidPaymentException("Unsupported payment provider: " + provider);
+            throw new InvalidPaymentException("Cổng thanh toán không được hỗ trợ: " + provider);
         }
         Payment.validateVndAmount(command.getAmount());
     }
@@ -153,7 +153,7 @@ public class CreatePaymentService implements CreatePaymentUseCase {
     private Instant resolveExpiry(CreatePaymentCommand command, Instant now) {
         if (command.getExpiredAt() != null) {
             if (!command.getExpiredAt().isAfter(now)) {
-                throw new InvalidPaymentException("expiredAt must be in the future: " + command.getExpiredAt());
+                throw new InvalidPaymentException("Thời hạn thanh toán phải ở tương lai: " + command.getExpiredAt());
             }
             return command.getExpiredAt();
         }

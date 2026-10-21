@@ -33,6 +33,6 @@ public class GetPaymentService implements GetPaymentUseCase {
     @Override
     public Payment getLatestPaymentByBookingId(UUID bookingId) {
         return loadPaymentPort.findLatestByBookingId(bookingId)
-                .orElseThrow(() -> new PaymentNotFoundException("No payment yet for booking " + bookingId));
+                .orElseThrow(() -> new PaymentNotFoundException("Chưa có thanh toán cho booking " + bookingId));
     }
 }

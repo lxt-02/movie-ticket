@@ -6,9 +6,7 @@ public enum PaymentStatus {
     SUCCESS,
     FAILED,
     EXPIRED,
-    CANCELLED,
-    REFUND_PENDING,
-    REFUNDED;
+    CANCELLED;
 
     public boolean isTerminal() {
         return this != PENDING && this != PROCESSING;
