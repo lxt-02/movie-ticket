@@ -33,8 +33,8 @@ public class UserDtoMapper {
                 .userId(user.getId())
                 .email(user.getEmail())
                 .fullName(user.getFullName())
-                .role(user.getRole())
-                .status(user.getStatus())
+                .role(user.getRole() != null ? user.getRole().name() : null)
+                .status(user.getStatus() != null ? user.getStatus().name() : null)
                 .valid(user.isActive())
                 .build();
     }

@@ -4,6 +4,6 @@ import java.util.UUID;
 
 public class UserNotFoundException extends DomainException {
     public UserNotFoundException(UUID userId) {
-        super("User not found with id: " + userId);
+        super("Không tìm thấy người dùng có id: " + userId);
     }
 }
