@@ -43,6 +43,17 @@ public class ShowtimeRepositoryAdapter implements ShowtimeRepository, ShowtimeRe
     }
 
     @Override
+    public int openSales(Instant opensBefore, Instant now) {
+        return showtimeJpaRepository.openSales(opensBefore, now, ShowtimeStatus.SCHEDULED, ShowtimeStatus.SELLING);
+    }
+
+    @Override
+    public int endFinished(Instant now) {
+        return showtimeJpaRepository.endFinished(now,
+                java.util.List.of(ShowtimeStatus.SCHEDULED, ShowtimeStatus.SELLING), ShowtimeStatus.ENDED);
+    }
+
+    @Override
     public PageResult<Showtime> search(UUID movieId, UUID cinemaId, UUID screenId, Instant from, Instant to,
                                        Collection<ShowtimeStatus> statuses, int page, int size) {
         Page<ShowtimeEntity> result = showtimeJpaRepository.search(movieId, cinemaId, screenId, from, to, statuses,

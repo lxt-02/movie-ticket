@@ -18,9 +18,9 @@ final class ScheduleRules {
         Instant from = start.minus(policy.cleaningBuffer());
         Instant to = end.plus(policy.cleaningBuffer());
         if (repository.existsOverlapping(screenId, from, to, excludeShowtimeId)) {
-            throw new ShowtimeConflictException("Screen " + screenId + " already has a showtime between "
-                    + from + " and " + to + " (including a " + policy.cleaningBuffer().toMinutes()
-                    + " min cleaning gap)");
+            throw new ShowtimeConflictException("Phòng " + screenId + " đã có suất chiếu trong khoảng "
+                    + from + " đến " + to + " (tính cả " + policy.cleaningBuffer().toMinutes()
+                    + " phút dọn phòng)");
         }
     }
 }

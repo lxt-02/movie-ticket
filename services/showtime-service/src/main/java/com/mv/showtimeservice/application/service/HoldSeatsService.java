@@ -42,7 +42,7 @@ public class HoldSeatsService implements HoldSeatsUseCase {
     @Transactional
     public HoldSeatsResult execute(HoldSeatsCommand command) {
         if (command.getBookingId() == null) {
-            throw new IllegalArgumentException("bookingId must not be null");
+            throw new IllegalArgumentException("Mã booking là bắt buộc");
         }
 
         // 1. Lock showtime row first. This serializes concurrent requests for the same bookingId
@@ -59,7 +59,7 @@ public class HoldSeatsService implements HoldSeatsUseCase {
         }
 
         if (!showtime.isSelling()) {
-            throw new SeatUnavailableException("Showtime is not currently available for seat reservation");
+            throw new SeatUnavailableException("Suất chiếu hiện không mở đặt ghế");
         }
 
         // 3. Lock seats in fixed ascending ID order (prevent deadlock)
@@ -69,13 +69,13 @@ public class HoldSeatsService implements HoldSeatsUseCase {
                 .collect(Collectors.toList());
 
         if (sortedSeatIds.isEmpty()) {
-            throw new IllegalArgumentException("Must specify at least one seat to hold");
+            throw new IllegalArgumentException("Phải chọn ít nhất một ghế");
         }
 
         List<ShowtimeSeat> lockedSeats = showtimeSeatRepositoryPort.findByIdsWithLock(sortedSeatIds);
 
         if (lockedSeats.size() != sortedSeatIds.size()) {
-            throw new SeatUnavailableException("One or more requested seats could not be found");
+            throw new SeatUnavailableException("Có ghế không tồn tại trong suất chiếu");
         }
 
         // 4. Validate all seats belong to showtime and are AVAILABLE
@@ -86,7 +86,7 @@ public class HoldSeatsService implements HoldSeatsUseCase {
 
         for (ShowtimeSeat seat : lockedSeats) {
             if (!seat.getShowtimeId().equals(command.getShowtimeId())) {
-                throw new SeatUnavailableException("Seat " + seat.getId() + " does not belong to showtime " + command.getShowtimeId());
+                throw new SeatUnavailableException("Ghế " + seat.getId() + " không thuộc suất chiếu " + command.getShowtimeId());
             }
 
             if (seat.getStatus() == HELD && seat.getLockedUntil() != null && now.isAfter(seat.getLockedUntil())) {
@@ -95,7 +95,7 @@ public class HoldSeatsService implements HoldSeatsUseCase {
             }
 
             if (!seat.isAvailable()) {
-                throw new SeatUnavailableException("Seat " + seat.getSeatLabel() + " is already taken or locked by another transaction");
+                throw new SeatUnavailableException("Ghế " + seat.getSeatLabel() + " vừa có người khác chọn");
             }
 
             holdItems.add(SeatHoldItem.builder()
@@ -135,7 +135,7 @@ public class HoldSeatsService implements HoldSeatsUseCase {
         SeatHold existingHold = existingHoldOpt.get();
         if (command.getRequestHash() == null || !command.getRequestHash().equals(existingHold.getRequestHash())) {
             throw new SeatHoldConflictException(
-                    "Booking " + command.getBookingId() + " already has a seat hold with a different request");
+                    "Booking " + command.getBookingId() + " đã giữ ghế với yêu cầu khác");
         }
 
         Showtime showtime = showtimeRepositoryPort.findById(existingHold.getShowtimeId())

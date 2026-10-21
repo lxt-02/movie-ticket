@@ -10,3 +10,7 @@ spring:
     database-platform: org.hibernate.dialect.H2Dialect
   flyway:
     enabled: false
+
+showtime:
+  scheduling:
+    enabled: false
