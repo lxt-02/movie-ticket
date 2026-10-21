@@ -4,7 +4,6 @@ import com.mv.bookingservice.application.command.PaymentEventCommand;
 import com.mv.bookingservice.application.port.in.HandlePaymentEventUseCase;
 import com.mv.bookingservice.application.port.out.InboxPort;
 import com.mv.bookingservice.application.port.out.LoadBookingPort;
-import com.mv.bookingservice.application.port.out.PaymentCommandPort;
 import com.mv.bookingservice.application.port.out.SaveBookingPort;
 import com.mv.bookingservice.application.port.out.ShowtimeClientPort;
 import com.mv.bookingservice.domain.model.booking.aggregate.Booking;
@@ -32,7 +31,6 @@ public class HandlePaymentEventService implements HandlePaymentEventUseCase {
     private final SaveBookingPort saveBookingPort;
     private final ShowtimeClientPort showtimeClientPort;
     private final SeatConfirmation seatConfirmation;
-    private final PaymentCommandPort paymentCommandPort;
 
     @Override
     @Transactional
@@ -76,46 +74,52 @@ public class HandlePaymentEventService implements HandlePaymentEventUseCase {
     private void onPaymentSucceeded(Booking booking, PaymentEventCommand event) {
         if (event.getAmount() == null || event.getAmount().compareTo(booking.getTotalAmount()) != 0
                 || event.getCurrency() == null || !event.getCurrency().equalsIgnoreCase(booking.getCurrency())) {
-            // Booking stays as it is (still PENDING: the buyer can pay again); this payment goes back.
-            refund(booking, event.getPaymentId(), "Paid " + event.getAmount() + " " + event.getCurrency()
+            // Booking stays as it is (still PENDING: the buyer can pay again); the payment is checked manually.
+            manualCheck(booking, event.getPaymentId(), "Paid " + event.getAmount() + " " + event.getCurrency()
                     + " but booking total is " + booking.getTotalAmount() + " " + booking.getCurrency());
+            saveBookingPort.save(booking);
             return;
         }
 
         BookingStatus status = booking.getStatus();
         if (status == BookingStatus.CONFIRMED) {
             if (event.getPaymentId() != null && !event.getPaymentId().equals(booking.getPaidPaymentId())) {
-                refund(booking, event.getPaymentId(), "Booking already paid by " + booking.getPaidPaymentId());
+                manualCheck(booking, event.getPaymentId(), "Booking already paid by " + booking.getPaidPaymentId());
+                saveBookingPort.save(booking);
             }
             return;
         }
         if (status == BookingStatus.CONFIRMING) {
             if (event.getPaymentId() != null && !event.getPaymentId().equals(booking.getPaidPaymentId())) {
-                refund(booking, event.getPaymentId(), "Booking already paid by " + booking.getPaidPaymentId());
+                manualCheck(booking, event.getPaymentId(), "Booking already paid by " + booking.getPaidPaymentId());
+                saveBookingPort.save(booking);
             } else if (seatConfirmation.tryConfirm(booking).changed()) {
                 saveBookingPort.save(booking);
             }
             return;
         }
         if (status != BookingStatus.PENDING) {
-            // CANCELLED / EXPIRED (seats already released) or already REFUND_PENDING / REFUNDED.
-            refund(booking, event.getPaymentId(), "Payment succeeded but booking is " + status);
+            // CANCELLED / EXPIRED: seats already released.
+            manualCheck(booking, event.getPaymentId(), "Payment succeeded but booking is " + status);
+            saveBookingPort.save(booking);
             return;
         }
 
         // Judge by when the buyer paid, not by when the event arrives (webhook / reconcile can be late).
         Instant paidAt = event.getPaidAt() != null ? event.getPaidAt() : Instant.now();
         if (!booking.wasPaidInTime(paidAt)) {
-            booking.requestRefund();
-            saveBookingPort.save(booking);
-            refund(booking, event.getPaymentId(),
+            // Too late: the seat hold is gone. The booking expires like an unpaid one.
+            booking.expire();
+            manualCheck(booking, event.getPaymentId(),
                     "Paid at " + paidAt + " after the payment deadline " + booking.getExpiresAt());
+            saveBookingPort.save(booking);
+            releaseHoldQuietly(booking);
             return;
         }
 
         booking.markConfirming(event.getPaymentId(), paidAt);
         // Temporary Showtime failure keeps the booking CONFIRMING (saved below) for the maintenance job;
-        // a permanent refusal moves it to REFUND_PENDING.
+        // a permanent refusal cancels it.
         seatConfirmation.tryConfirm(booking);
         saveBookingPort.save(booking);
     }
@@ -146,10 +150,13 @@ public class HandlePaymentEventService implements HandlePaymentEventUseCase {
         log.info("Booking {} EXPIRED with its payment link", booking.getId());
     }
 
-    /** The refund is written to the outbox in this transaction (REFUND_PAYMENT), never just logged. */
-    private void refund(Booking booking, java.util.UUID paymentId, String reason) {
-        log.error("REFUND NEEDED: booking {} payment {}: {}", booking.getId(), paymentId, reason);
-        paymentCommandPort.requestRefund(booking, paymentId, reason);
+    /**
+     * Money that the booking cannot use. No refund flow in this system: the booking is flagged
+     * ({@code needs_refund}, listed by GET /api/v1/bookings/admin/needs-refund) and logged. The caller saves.
+     */
+    private void manualCheck(Booking booking, java.util.UUID paymentId, String reason) {
+        log.error("MANUAL CHECK: booking {} payment {}: {}", booking.getId(), paymentId, reason);
+        booking.flagForRefund("Payment " + paymentId + ": " + reason);
     }
 
     private void releaseHoldQuietly(Booking booking) {

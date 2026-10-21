@@ -19,8 +19,6 @@ import java.util.UUID;
  * { commandId, aggregateId, commandType: "CREATE_PAYMENT", occurredAt,
  *   payload: { bookingId, userId, amount, currency, provider, description, expiredAt, idempotencyKey } }
  * { commandId, aggregateId, commandType: "CANCEL_PAYMENT", occurredAt, payload: { bookingId, reason } }
- * { commandId, aggregateId, commandType: "REFUND_PAYMENT", occurredAt,
- *   payload: { bookingId, paymentId, amount, currency, reason } }
  * </pre>
  * The idempotency key carries the attempt number, so "pay again" is a new key and payment-service replaces
  * the previous link, while a redelivered command (same key) returns the same payment.
@@ -31,7 +29,6 @@ public class PaymentCommandOutboxAdapter implements PaymentCommandPort {
 
     public static final String CREATE_PAYMENT = "CREATE_PAYMENT";
     public static final String CANCEL_PAYMENT = "CANCEL_PAYMENT";
-    public static final String REFUND_PAYMENT = "REFUND_PAYMENT";
     private static final String PROVIDER = "PAYOS";
 
     private final OutboxPort outboxPort;
@@ -59,17 +56,6 @@ public class PaymentCommandOutboxAdapter implements PaymentCommandPort {
         payload.put("bookingId", booking.getId());
         payload.put("reason", reason);
         write(booking, CANCEL_PAYMENT, payload);
-    }
-
-    @Override
-    public void requestRefund(Booking booking, UUID paymentId, String reason) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("bookingId", booking.getId());
-        payload.put("paymentId", paymentId);
-        payload.put("amount", booking.getTotalAmount());
-        payload.put("currency", booking.getCurrency());
-        payload.put("reason", reason);
-        write(booking, REFUND_PAYMENT, payload);
     }
 
     private void write(Booking booking, String commandType, Map<String, Object> payload) {

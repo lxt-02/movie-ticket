@@ -21,7 +21,7 @@ public class CreateBookingRequest {
 
     private UUID userId;
 
-    @NotNull(message = "showtimeId must not be null")
+    @NotNull(message = "Suất chiếu là bắt buộc")
     private UUID showtimeId;
 
     private String movieTitle;
@@ -36,7 +36,7 @@ public class CreateBookingRequest {
 
     private java.time.Instant expiresAt;
 
-    @NotEmpty(message = "seats list must not be empty")
+    @NotEmpty(message = "Phải chọn ít nhất một ghế")
     @Valid
     private List<CreateBookingSeatRequest> seats;
 }

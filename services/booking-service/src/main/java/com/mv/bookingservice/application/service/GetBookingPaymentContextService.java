@@ -25,15 +25,15 @@ public class GetBookingPaymentContextService implements GetBookingPaymentContext
                 .orElseThrow(() -> new BookingNotFoundException(query.getBookingId()));
 
         if (query.getUserId() != null && !query.getUserId().equals(booking.getUserId())) {
-            throw new BookingValidationException("User does not own this booking");
+            throw new BookingValidationException("Booking này không phải của bạn");
         }
 
         if (booking.getStatus() != BookingStatus.PENDING) {
-            throw new InvalidBookingStateException("Booking is not in PENDING state. Current status: " + booking.getStatus());
+            throw new InvalidBookingStateException("Booking không còn chờ thanh toán. Trạng thái hiện tại: " + booking.getStatus());
         }
 
         if (booking.isExpired()) {
-            throw new InvalidBookingStateException("Booking has expired at: " + booking.getExpiresAt());
+            throw new InvalidBookingStateException("Booking đã hết hạn lúc: " + booking.getExpiresAt());
         }
 
         return booking;

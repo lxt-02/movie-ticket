@@ -34,7 +34,7 @@ public class RetryBookingPaymentService implements RetryBookingPaymentUseCase {
         Booking booking = loadBookingPort.findById(command.getBookingId())
                 .orElseThrow(() -> new BookingNotFoundException(command.getBookingId()));
         if (command.getUserId() == null || !command.getUserId().equals(booking.getUserId())) {
-            throw new BookingValidationException("Access denied to pay this booking");
+            throw new BookingValidationException("Bạn không có quyền thanh toán booking này");
         }
 
         booking.startNewPaymentAttempt(policy.maxPaymentAttempts());

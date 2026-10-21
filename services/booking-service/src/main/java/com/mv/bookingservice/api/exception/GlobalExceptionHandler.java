@@ -46,7 +46,7 @@ public class GlobalExceptionHandler {
                 .success(false)
                 .status(status.value())
                 .error(status.getReasonPhrase())
-                .message("Missing required header " + ex.getHeaderName())
+                .message("Thiếu header bắt buộc: " + ex.getHeaderName())
                 .path(request.getRequestURI())
                 .timestamp(Instant.now())
                 .build();
@@ -105,7 +105,7 @@ public class GlobalExceptionHandler {
                 .success(false)
                 .status(HttpStatus.BAD_REQUEST.value())
                 .error("Validation Failed")
-                .message("Invalid request payload")
+                .message("Dữ liệu gửi lên không hợp lệ")
                 .errors(errors)
                 .path(request.getRequestURI())
                 .timestamp(Instant.now())
@@ -116,11 +116,12 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGeneralException(Exception ex, HttpServletRequest request) {
+        org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class).error("Unhandled exception on {}", request.getRequestURI(), ex);
         ErrorResponse response = ErrorResponse.builder()
                 .success(false)
                 .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
                 .error(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase())
-                .message(ex.getMessage() != null ? ex.getMessage() : "An unexpected error occurred")
+                .message(CommonExceptionHandler.GENERIC_ERROR)
                 .path(request.getRequestURI())
                 .timestamp(Instant.now())
                 .build();

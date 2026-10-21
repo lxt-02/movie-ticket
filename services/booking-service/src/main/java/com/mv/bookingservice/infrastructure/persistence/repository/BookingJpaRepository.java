@@ -55,4 +55,8 @@ public interface BookingJpaRepository extends JpaRepository<BookingEntity, UUID>
             FOR UPDATE SKIP LOCKED
             """, nativeQuery = true)
     List<BookingEntity> findConfirmingForUpdate(@Param("limit") int limit);
+
+    /** Bookings with money to give back by hand (see V5__saga_reliability.sql). */
+    @EntityGraph(attributePaths = {"seats"})
+    List<BookingEntity> findByNeedsRefundTrueOrderByUpdatedAtDesc();
 }

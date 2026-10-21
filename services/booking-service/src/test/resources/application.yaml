@@ -15,6 +15,9 @@ spring:
     listener:
       # No broker in unit tests: do not start the payment-events consumer.
       auto-startup: false
+    admin:
+      # No broker in unit tests: do not try to create payment-events.DLT.
+      auto-create: false
 
 booking:
   scheduling:
