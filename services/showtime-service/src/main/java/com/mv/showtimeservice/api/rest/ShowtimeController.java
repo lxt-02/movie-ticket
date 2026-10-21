@@ -172,7 +172,7 @@ public class ShowtimeController {
     }
 
     private static ShowtimeSeatResponse toSeatResponse(ShowtimeSeat seat, Instant now) {
-        return new ShowtimeSeatResponse(seat.getId(), seat.getSeatId(), seat.getSeatLabel(), seat.getSeatType(),
+        return ShowtimeSeatResponse.of(seat.getId(), seat.getSeatId(), seat.getSeatLabel(), seat.getSeatType(),
                 seat.getPrice(), seat.displayStatus(now));
     }
 }

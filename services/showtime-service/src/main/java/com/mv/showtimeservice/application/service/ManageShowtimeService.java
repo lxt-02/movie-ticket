@@ -26,7 +26,7 @@ import java.util.UUID;
  * <p>
  * The showtime row is locked first (same as {@link HoldSeatsService} and seat confirm / release), so nobody can
  * hold a seat while the admin is changing the showtime. Changes are refused once any seat is sold or held by a
- * live hold: buyers paid for a given time and price, and there is no refund flow.
+ * live hold: buyers paid for a given time and price.
  */
 @Service
 @RequiredArgsConstructor
