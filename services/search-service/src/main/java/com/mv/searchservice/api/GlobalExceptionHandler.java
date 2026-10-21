@@ -36,7 +36,9 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(SearchUnavailableException.class)
     public ResponseEntity<ErrorResponse> unavailable(SearchUnavailableException ex, HttpServletRequest request) {
         log.warn("Search unavailable: {}", ex.getMessage());
-        return error(HttpStatus.SERVICE_UNAVAILABLE, "Dịch vụ tìm kiếm tạm thời không khả dụng, vui lòng thử lại sau", request);
+        ResponseEntity<ErrorResponse> response = error(HttpStatus.SERVICE_UNAVAILABLE,
+                "Dịch vụ tìm kiếm tạm thời không khả dụng, vui lòng thử lại sau", request);
+        return ResponseEntity.status(response.getStatusCode()).header("Retry-After", "10").body(response.getBody());
     }
 
     @ExceptionHandler(Exception.class)
