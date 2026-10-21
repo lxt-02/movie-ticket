@@ -3,6 +3,8 @@ package com.mv.movieservice.application.service;
 import com.mv.movieservice.application.command.SaveMovieCommand;
 import com.mv.movieservice.application.port.out.LoadMoviePort;
 import com.mv.movieservice.application.port.out.SaveMoviePort;
+import com.mv.movieservice.application.port.out.CataloguePort;
+import com.mv.movieservice.application.port.out.MovieEventPort;
 import com.mv.movieservice.domain.model.movie.aggregate.Movie;
 import com.mv.movieservice.domain.model.movie.enums.MovieStatus;
 import com.mv.movieservice.domain.model.movie.exception.InvalidMovieException;
@@ -35,12 +37,17 @@ class ManageMovieServiceTest {
     private LoadMoviePort loadMoviePort;
     @Mock
     private SaveMoviePort saveMoviePort;
+    @Mock
+    private CataloguePort cataloguePort;
+    @Mock
+    private MovieEventPort movieEventPort;
 
     private ManageMovieService service;
 
     @BeforeEach
     void setUp() {
-        service = new ManageMovieService(loadMoviePort, saveMoviePort, Clock.fixed(NOW, ZoneOffset.UTC));
+        service = new ManageMovieService(loadMoviePort, saveMoviePort, cataloguePort, movieEventPort,
+                Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     private static SaveMovieCommand command(String title) {
