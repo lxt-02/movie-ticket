@@ -26,7 +26,4 @@ public interface LoadBookingPort {
 
     /** CONFIRMING bookings, oldest update first, locked with FOR UPDATE SKIP LOCKED. */
     List<Booking> findConfirmingForUpdate(int limit);
-
-    /** Bookings flagged needs_refund, newest change first. */
-    List<Booking> findNeedingRefund();
 }

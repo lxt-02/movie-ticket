@@ -115,7 +115,7 @@ class HandlePaymentEventServiceTest {
     }
 
     @Test
-    void paymentForCancelledBookingIsFlaggedForRefund() {
+    void paymentForCancelledBookingDoesNotChangeIt() {
         booking.setStatus(BookingStatus.CANCELLED);
         PaymentEventCommand event = event(PaymentEventCommand.PAYMENT_SUCCEEDED, new BigDecimal("150000"));
         when(inboxPort.isProcessed(event.getEventId())).thenReturn(false);
@@ -124,8 +124,7 @@ class HandlePaymentEventServiceTest {
         service.handle(event);
 
         assertEquals(BookingStatus.CANCELLED, booking.getStatus());
-        assertTrue(booking.isNeedsRefund());
-        verify(saveBookingPort).save(booking);
+        verify(saveBookingPort, never()).save(any());
         verify(showtimeClientPort, never()).confirmHold(any());
     }
 
@@ -154,7 +153,6 @@ class HandlePaymentEventServiceTest {
 
         verify(showtimeClientPort, never()).confirmHold(any());
         assertEquals(BookingStatus.EXPIRED, booking.getStatus());
-        assertTrue(booking.isNeedsRefund());
     }
 
     @Test
@@ -192,7 +190,7 @@ class HandlePaymentEventServiceTest {
 
         verify(showtimeClientPort, never()).confirmHold(any());
         assertEquals(BookingStatus.PENDING, booking.getStatus());
-        assertTrue(booking.isNeedsRefund());
+        verify(saveBookingPort, never()).save(any());
         verify(inboxPort).markProcessed(event.getEventId(), PaymentEventCommand.PAYMENT_SUCCEEDED);
     }
 

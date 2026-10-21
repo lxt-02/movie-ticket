@@ -77,7 +77,6 @@ public class HandlePaymentEventService implements HandlePaymentEventUseCase {
             // Booking stays as it is (still PENDING: the buyer can pay again); the payment is checked manually.
             manualCheck(booking, event.getPaymentId(), "Paid " + event.getAmount() + " " + event.getCurrency()
                     + " but booking total is " + booking.getTotalAmount() + " " + booking.getCurrency());
-            saveBookingPort.save(booking);
             return;
         }
 
@@ -85,14 +84,12 @@ public class HandlePaymentEventService implements HandlePaymentEventUseCase {
         if (status == BookingStatus.CONFIRMED) {
             if (event.getPaymentId() != null && !event.getPaymentId().equals(booking.getPaidPaymentId())) {
                 manualCheck(booking, event.getPaymentId(), "Booking already paid by " + booking.getPaidPaymentId());
-                saveBookingPort.save(booking);
             }
             return;
         }
         if (status == BookingStatus.CONFIRMING) {
             if (event.getPaymentId() != null && !event.getPaymentId().equals(booking.getPaidPaymentId())) {
                 manualCheck(booking, event.getPaymentId(), "Booking already paid by " + booking.getPaidPaymentId());
-                saveBookingPort.save(booking);
             } else if (seatConfirmation.tryConfirm(booking).changed()) {
                 saveBookingPort.save(booking);
             }
@@ -101,7 +98,6 @@ public class HandlePaymentEventService implements HandlePaymentEventUseCase {
         if (status != BookingStatus.PENDING) {
             // CANCELLED / EXPIRED: seats already released.
             manualCheck(booking, event.getPaymentId(), "Payment succeeded but booking is " + status);
-            saveBookingPort.save(booking);
             return;
         }
 
@@ -150,13 +146,9 @@ public class HandlePaymentEventService implements HandlePaymentEventUseCase {
         log.info("Booking {} EXPIRED with its payment link", booking.getId());
     }
 
-    /**
-     * Money that the booking cannot use. No refund flow in this system: the booking is flagged
-     * ({@code needs_refund}, listed by GET /api/v1/bookings/admin/needs-refund) and logged. The caller saves.
-     */
+    /** Money that the booking cannot use: logged for manual check, the booking is not changed. */
     private void manualCheck(Booking booking, java.util.UUID paymentId, String reason) {
         log.error("MANUAL CHECK: booking {} payment {}: {}", booking.getId(), paymentId, reason);
-        booking.flagForRefund("Payment " + paymentId + ": " + reason);
     }
 
     private void releaseHoldQuietly(Booking booking) {
