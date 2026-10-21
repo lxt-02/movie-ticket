@@ -8,6 +8,15 @@ public class InvalidSeatHoldStateException extends DomainException {
     }
 
     public InvalidSeatHoldStateException(SeatHoldStatus currentStatus, String targetAction) {
-        super("Cannot " + targetAction + " hold in status " + currentStatus);
+        super("Không thể " + label(targetAction) + " lượt giữ ghế đang ở trạng thái " + currentStatus);
+    }
+
+    private static String label(String action) {
+        return switch (action) {
+            case "confirm" -> "xác nhận";
+            case "release" -> "nhả";
+            case "expire" -> "cho hết hạn";
+            default -> action;
+        };
     }
 }

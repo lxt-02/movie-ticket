@@ -80,22 +80,22 @@ public class CreateShowtimeService implements CreateShowtimeUseCase {
 
     private void validateCommand(CreateShowtimeCommand command) {
         if (command == null) {
-            throw new IllegalArgumentException("Create showtime command must not be null");
+            throw new IllegalArgumentException("Thiếu dữ liệu suất chiếu");
         }
         if (command.getMovieId() == null) {
-            throw new IllegalArgumentException("movieId must not be null");
+            throw new IllegalArgumentException("Phim là bắt buộc");
         }
         if (command.getCinemaId() == null) {
-            throw new IllegalArgumentException("cinemaId must not be null");
+            throw new IllegalArgumentException("Rạp là bắt buộc");
         }
         if (command.getScreenId() == null) {
-            throw new IllegalArgumentException("screenId must not be null");
+            throw new IllegalArgumentException("Phòng chiếu là bắt buộc");
         }
         if (command.getStartTime() == null || !command.getStartTime().isAfter(Instant.now())) {
-            throw new IllegalArgumentException("startTime must be in the future");
+            throw new IllegalArgumentException("Giờ chiếu phải ở tương lai");
         }
         if (command.getBasePrice() == null || command.getBasePrice().signum() < 0) {
-            throw new IllegalArgumentException("basePrice must be greater than or equal to 0");
+            throw new IllegalArgumentException("Giá vé không được âm");
         }
     }
 
@@ -106,19 +106,19 @@ public class CreateShowtimeService implements CreateShowtimeUseCase {
             CinemaClientPort.ScreenLayoutSnapshot screen
     ) {
         if (!"NOW_SHOWING".equalsIgnoreCase(movie.status())) {
-            throw new IllegalArgumentException("Movie is not available for scheduling");
+            throw new IllegalArgumentException("Phim không ở trạng thái được xếp lịch chiếu");
         }
         if (!"ACTIVE".equalsIgnoreCase(cinema.status())) {
-            throw new IllegalArgumentException("Cinema is not active");
+            throw new IllegalArgumentException("Rạp không hoạt động");
         }
         if (!command.getCinemaId().equals(screen.cinemaId())) {
-            throw new IllegalArgumentException("Screen does not belong to requested cinema");
+            throw new IllegalArgumentException("Phòng chiếu không thuộc rạp đã chọn");
         }
         if (!"ACTIVE".equalsIgnoreCase(screen.status())) {
-            throw new IllegalArgumentException("Screen is not active");
+            throw new IllegalArgumentException("Phòng chiếu không hoạt động");
         }
         if (screen.seats() == null || screen.seats().isEmpty()) {
-            throw new IllegalArgumentException("Screen layout has no seats");
+            throw new IllegalArgumentException("Phòng chiếu chưa có sơ đồ ghế");
         }
     }
 

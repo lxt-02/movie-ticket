@@ -30,7 +30,7 @@ public class ShowtimeSeat {
 
     public void hold(UUID holdId, Instant lockedUntil) {
         if (!isAvailable()) {
-            throw new SeatUnavailableException("Seat " + seatLabel + " is not available for hold (Current status: " + status + ")");
+            throw new SeatUnavailableException("Ghế " + seatLabel + " không giữ được (trạng thái hiện tại: " + status + ")");
         }
         this.status = ShowtimeSeatStatus.HELD;
         this.holdId = holdId;

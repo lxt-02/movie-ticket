@@ -6,6 +6,6 @@ import java.util.UUID;
 
 public class ShowtimeNotFoundException extends DomainException {
     public ShowtimeNotFoundException(UUID showtimeId) {
-        super("Showtime not found: " + showtimeId);
+        super("Không tìm thấy suất chiếu: " + showtimeId);
     }
 }

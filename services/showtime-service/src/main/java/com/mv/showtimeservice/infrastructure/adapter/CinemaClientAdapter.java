@@ -2,11 +2,12 @@ package com.mv.showtimeservice.infrastructure.adapter;
 
 import com.mv.showtimeservice.application.port.out.CinemaClientPort;
 import com.mv.showtimeservice.infrastructure.client.CinemaFeignClient;
-import com.mv.showtimeservice.infrastructure.client.dto.ApiResponse;
-import com.mv.showtimeservice.infrastructure.client.dto.CinemaResponse;
-import com.mv.showtimeservice.infrastructure.client.dto.ScreenLayoutResponse;
-import com.mv.showtimeservice.infrastructure.client.dto.ScreenResponse;
+import com.mv.showtimeservice.infrastructure.client.dto.CinemaDto;
+import com.mv.showtimeservice.infrastructure.client.dto.ScreenDto;
+import com.mv.showtimeservice.infrastructure.client.dto.ScreenLayoutDto;
+import com.mv.showtimeservice.infrastructure.client.dto.RemoteResponse;
 import lombok.RequiredArgsConstructor;
+import feign.FeignException;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -20,22 +21,36 @@ public class CinemaClientAdapter implements CinemaClientPort {
 
     @Override
     public CinemaSnapshot getCinema(UUID cinemaId) {
-        ApiResponse<CinemaResponse> response = cinemaFeignClient.getCinema(cinemaId);
-        if (response == null || !response.isSuccess() || response.getData() == null) {
-            throw new IllegalArgumentException("Cinema " + cinemaId + " could not be loaded");
+        RemoteResponse<CinemaDto> response;
+        try {
+            response = cinemaFeignClient.getCinema(cinemaId);
+        } catch (FeignException e) {
+            throw RemoteCalls.translate(e, "rạp", "Không tìm thấy rạp " + cinemaId);
+        } catch (RuntimeException e) {
+            throw RemoteCalls.unavailable("rạp", e);
         }
-        CinemaResponse cinema = response.getData();
+        if (response == null || !response.isSuccess() || response.getData() == null) {
+            throw new IllegalArgumentException("Rạp " + cinemaId + " không tải được");
+        }
+        CinemaDto cinema = response.getData();
         return new CinemaSnapshot(cinema.getId(), cinema.getName(), cinema.getStatus());
     }
 
     @Override
     public ScreenLayoutSnapshot getScreenLayout(UUID screenId) {
-        ApiResponse<ScreenLayoutResponse> response = cinemaFeignClient.getScreenLayout(screenId);
-        if (response == null || !response.isSuccess() || response.getData() == null || response.getData().getScreen() == null) {
-            throw new IllegalArgumentException("Screen layout " + screenId + " could not be loaded");
+        RemoteResponse<ScreenLayoutDto> response;
+        try {
+            response = cinemaFeignClient.getScreenLayout(screenId);
+        } catch (FeignException e) {
+            throw RemoteCalls.translate(e, "rạp", "Không tìm thấy phòng chiếu " + screenId);
+        } catch (RuntimeException e) {
+            throw RemoteCalls.unavailable("rạp", e);
         }
-        ScreenLayoutResponse layout = response.getData();
-        ScreenResponse screen = layout.getScreen();
+        if (response == null || !response.isSuccess() || response.getData() == null || response.getData().getScreen() == null) {
+            throw new IllegalArgumentException("Sơ đồ ghế của phòng " + screenId + " không tải được");
+        }
+        ScreenLayoutDto layout = response.getData();
+        ScreenDto screen = layout.getScreen();
         List<SeatSnapshot> seats = layout.getSeats() == null ? List.of() : layout.getSeats().stream()
                 .map(seat -> new SeatSnapshot(
                         seat.getId(),

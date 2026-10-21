@@ -1,7 +1,7 @@
 package com.mv.showtimeservice.api.rest;
 
-import com.mv.showtimeservice.api.dto.request.HoldSeatsRequest;
 import com.mv.showtimeservice.api.dto.response.ApiResponse;
+import com.mv.showtimeservice.api.dto.request.HoldSeatsRequest;
 import com.mv.showtimeservice.api.dto.response.SeatHoldResponse;
 import com.mv.showtimeservice.api.mapper.ShowtimeDtoMapper;
 import com.mv.showtimeservice.application.command.ConfirmHoldCommand;
@@ -18,18 +18,20 @@ import com.mv.showtimeservice.domain.model.seathold.aggregate.SeatHold;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
 
+/**
+ * Seat hold API (service-to-service), called by booking-service (its own ShowtimeFeignClient).
+ * Full paths on each method, no class-level mapping.
+ */
 @RestController
-@RequestMapping("/internal")
 @RequiredArgsConstructor
 public class InternalShowtimeController {
 
@@ -39,83 +41,40 @@ public class InternalShowtimeController {
     private final ConfirmHoldUseCase confirmHoldUseCase;
     private final ShowtimeDtoMapper showtimeDtoMapper;
 
-    /**
-     * Endpoint called by Booking Service to atomically hold seats.
-     * Contract: POST /internal/showtimes/{id}/holds
-     */
-    @PostMapping("/showtimes/{id}/holds")
-    public ResponseEntity<ApiResponse<SeatHoldResponse>> holdSeats(
-            @PathVariable("id") UUID showtimeId,
-            @Valid @RequestBody HoldSeatsRequest request
-    ) {
-        // Idempotency is keyed by bookingId (unique per hold); no caller-supplied key is needed.
+    /** Idempotency is keyed by bookingId (unique per hold); no caller-supplied key is needed. */
+    @PostMapping("/internal/showtimes/{id}/holds")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<SeatHoldResponse> holdSeats(@PathVariable("id") UUID showtimeId,
+                                                   @Valid @RequestBody HoldSeatsRequest request) {
         HoldSeatsCommand command = showtimeDtoMapper.toCommand(showtimeId, request);
         HoldSeatsResult result = holdSeatsUseCase.execute(command);
-        SeatHoldResponse response = showtimeDtoMapper.toResponse(result);
-        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success("Seats held successfully", response));
+        return ApiResponse.success("Giữ ghế thành công", showtimeDtoMapper.toResponse(result));
     }
 
-    /**
-     * Endpoint called by Booking Service to query hold by booking ID after timeout / retry.
-     * Contract: GET /internal/holds/by-booking/{bookingId}
-     */
-    @GetMapping("/holds/by-booking/{bookingId}")
-    public ResponseEntity<ApiResponse<SeatHoldResponse>> getHoldByBookingId(
-            @PathVariable("bookingId") UUID bookingId
-    ) {
-        GetHoldByBookingIdQuery query = GetHoldByBookingIdQuery.builder()
-                .bookingId(bookingId)
-                .build();
-        SeatHold hold = getHoldUseCase.getByBookingId(query);
-        SeatHoldResponse response = showtimeDtoMapper.toResponse(hold, null, null);
-        return ResponseEntity.ok(ApiResponse.success("Hold found", response));
+    @GetMapping("/internal/holds/by-booking/{bookingId}")
+    public ApiResponse<SeatHoldResponse> getHoldByBookingId(@PathVariable("bookingId") UUID bookingId) {
+        SeatHold hold = getHoldUseCase.getByBookingId(GetHoldByBookingIdQuery.builder().bookingId(bookingId).build());
+        return ApiResponse.success("Đã tìm thấy lượt giữ ghế", showtimeDtoMapper.toResponse(hold, null, null));
     }
 
-    /**
-     * Endpoint to query hold by hold ID.
-     * Contract: GET /internal/holds/{id}
-     */
-    @GetMapping("/holds/{id}")
-    public ResponseEntity<ApiResponse<SeatHoldResponse>> getHoldById(
-            @PathVariable("id") UUID holdId
-    ) {
-        GetHoldByIdQuery query = GetHoldByIdQuery.builder()
-                .holdId(holdId)
-                .build();
-        SeatHold hold = getHoldUseCase.getById(query);
-        SeatHoldResponse response = showtimeDtoMapper.toResponse(hold, null, null);
-        return ResponseEntity.ok(ApiResponse.success("Hold found", response));
+    /** Not used by booking-service at the moment. */
+    @GetMapping("/internal/holds/{id}")
+    public ApiResponse<SeatHoldResponse> getHoldById(@PathVariable("id") UUID holdId) {
+        SeatHold hold = getHoldUseCase.getById(GetHoldByIdQuery.builder().holdId(holdId).build());
+        return ApiResponse.success("Đã tìm thấy lượt giữ ghế", showtimeDtoMapper.toResponse(hold, null, null));
     }
 
-    /**
-     * Endpoint to release held seats when booking fails or expires.
-     * Contract: POST /internal/holds/{id}/release
-     */
-    @PostMapping("/holds/{id}/release")
-    public ResponseEntity<ApiResponse<SeatHoldResponse>> releaseHold(
-            @PathVariable("id") UUID holdId
-    ) {
-        ReleaseHoldCommand command = ReleaseHoldCommand.builder()
-                .holdId(holdId)
-                .build();
-        SeatHold hold = releaseHoldUseCase.execute(command);
-        SeatHoldResponse response = showtimeDtoMapper.toResponse(hold, null, null);
-        return ResponseEntity.ok(ApiResponse.success("Hold released successfully", response));
+    /** Gives the held seats back (booking cancelled / expired). */
+    @PostMapping("/internal/holds/{id}/release")
+    public ApiResponse<SeatHoldResponse> releaseHold(@PathVariable("id") UUID holdId) {
+        SeatHold hold = releaseHoldUseCase.execute(ReleaseHoldCommand.builder().holdId(holdId).build());
+        return ApiResponse.success("Đã nhả ghế", showtimeDtoMapper.toResponse(hold, null, null));
     }
 
-    /**
-     * Endpoint to confirm held seats (BOOKED) after successful payment.
-     * Contract: POST /internal/holds/{id}/confirm
-     */
-    @PostMapping("/holds/{id}/confirm")
-    public ResponseEntity<ApiResponse<SeatHoldResponse>> confirmHold(
-            @PathVariable("id") UUID holdId
-    ) {
-        ConfirmHoldCommand command = ConfirmHoldCommand.builder()
-                .holdId(holdId)
-                .build();
-        SeatHold hold = confirmHoldUseCase.execute(command);
-        SeatHoldResponse response = showtimeDtoMapper.toResponse(hold, null, null);
-        return ResponseEntity.ok(ApiResponse.success("Hold confirmed successfully", response));
+    /** Held seats become BOOKED after payment. 409 if the hold is no longer valid. */
+    @PostMapping("/internal/holds/{id}/confirm")
+    public ApiResponse<SeatHoldResponse> confirmHold(@PathVariable("id") UUID holdId) {
+        SeatHold hold = confirmHoldUseCase.execute(ConfirmHoldCommand.builder().holdId(holdId).build());
+        return ApiResponse.success("Đã xác nhận ghế", showtimeDtoMapper.toResponse(hold, null, null));
     }
 }

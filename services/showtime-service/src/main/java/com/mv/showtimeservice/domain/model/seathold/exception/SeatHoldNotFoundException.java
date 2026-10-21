@@ -4,7 +4,7 @@ import java.util.UUID;
 
 public class SeatHoldNotFoundException extends DomainException {
     public SeatHoldNotFoundException(UUID holdId) {
-        super("Seat hold not found: " + holdId);
+        super("Không tìm thấy lượt giữ ghế: " + holdId);
     }
 
     public static SeatHoldNotFoundException byBookingId(UUID bookingId) {

@@ -9,6 +9,6 @@ public class SeatUnavailableException extends DomainException {
     }
 
     public SeatUnavailableException(List<UUID> seatIds) {
-        super("The following seats are unavailable: " + seatIds);
+        super("Các ghế sau không còn trống: " + seatIds);
     }
 }

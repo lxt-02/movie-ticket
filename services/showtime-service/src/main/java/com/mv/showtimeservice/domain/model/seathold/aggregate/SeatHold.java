@@ -42,19 +42,19 @@ public class SeatHold {
             List<SeatHoldItem> items
     ) {
         if (bookingId == null) {
-            throw new IllegalArgumentException("bookingId must not be null");
+            throw new IllegalArgumentException("Mã booking là bắt buộc");
         }
         if (showtimeId == null) {
-            throw new IllegalArgumentException("showtimeId must not be null");
+            throw new IllegalArgumentException("Suất chiếu là bắt buộc");
         }
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
-            throw new IllegalArgumentException("idempotencyKey must not be blank");
+            throw new IllegalArgumentException("Thiếu khoá idempotency");
         }
         if (requestHash == null || requestHash.isBlank()) {
-            throw new IllegalArgumentException("requestHash must not be blank");
+            throw new IllegalArgumentException("Thiếu mã băm yêu cầu");
         }
         if (expiresAt == null) {
-            throw new IllegalArgumentException("expiresAt must not be null");
+            throw new IllegalArgumentException("Thiếu thời điểm hết hạn");
         }
 
         UUID holdId = UUID.randomUUID();

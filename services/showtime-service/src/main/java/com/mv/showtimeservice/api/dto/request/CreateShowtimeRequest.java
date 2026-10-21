@@ -20,20 +20,20 @@ import java.util.UUID;
 @AllArgsConstructor
 public class CreateShowtimeRequest {
 
-    @NotNull(message = "movieId must not be null")
+    @NotNull(message = "Phim là bắt buộc")
     private UUID movieId;
 
-    @NotNull(message = "cinemaId must not be null")
+    @NotNull(message = "Rạp là bắt buộc")
     private UUID cinemaId;
 
-    @NotNull(message = "screenId must not be null")
+    @NotNull(message = "Phòng chiếu là bắt buộc")
     private UUID screenId;
 
-    @NotNull(message = "startTime must not be null")
-    @Future(message = "startTime must be in the future")
+    @NotNull(message = "Giờ chiếu là bắt buộc")
+    @Future(message = "Giờ chiếu phải ở tương lai")
     private Instant startTime;
 
-    @NotNull(message = "basePrice must not be null")
-    @DecimalMin(value = "0.00", message = "basePrice must be greater than or equal to 0")
+    @NotNull(message = "Giá vé là bắt buộc")
+    @DecimalMin(value = "0.00", message = "Giá vé không được âm")
     private BigDecimal basePrice;
 }

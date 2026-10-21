@@ -23,6 +23,12 @@ public interface ShowtimeRepositoryPort {
      */
     boolean existsOverlapping(UUID screenId, Instant from, Instant to, UUID excludeShowtimeId);
 
+    /** @return number of showtimes moved SCHEDULED -> SELLING */
+    int openSales(Instant opensBefore, Instant now);
+
+    /** @return number of showtimes moved to ENDED */
+    int endFinished(Instant now);
+
     PageResult<Showtime> search(UUID movieId, UUID cinemaId, UUID screenId, Instant from, Instant to,
                                 Collection<ShowtimeStatus> statuses, int page, int size);
 }

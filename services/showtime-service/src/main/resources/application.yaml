@@ -32,15 +32,6 @@ spring:
     baseline-on-migrate: true
     locations: classpath:db/migration
 
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info,metrics
-  endpoint:
-    health:
-      show-details: always
-
 clients:
   movie:
     base-url: ${MOVIE_SERVICE_URL}
@@ -53,9 +44,45 @@ eureka:
       defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE}
   instance:
     prefer-ip-address: true
-    instance-id: ${spring.application.name}:${server.port}
+    # IP in the ID: several instances on the same port (docker compose --scale) stay distinct in Eureka.
+    instance-id: ${EUREKA_INSTANCE_ID:${spring.application.name}:${spring.cloud.client.ip-address}:${server.port}}
 
 showtime:
+  scheduling:
+    enabled: true
+  lifecycle:
+    # SCHEDULED -> SELLING this long before the start ("open for sale"); SELLING/SCHEDULED -> ENDED after the end.
+    sales-open-days: 7
+    delay-ms: 60000
   schedule:
     # Minimum gap between two showtimes of the same screen (cleaning, ads, entry/exit).
     cleaning-buffer-minutes: 15
+
+logging:
+  pattern:
+    # Correlation ID of the request (X-Correlation-Id) in every log line
+    correlation: '[cid=%X{correlationId:-} trace=%X{traceId:-}] '
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  tracing:
+    sampling:
+      # Every request is traced (demo). Lower it in production (e.g. 0.1).
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+    export:
+      zipkin:
+        endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+  # Same setting under its Spring Boot 3 name (ignored if unknown).
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+  metrics:
+    tags:
+      # Every metric carries the service name (Grafana filter).
+      application: ${spring.application.name}

@@ -26,7 +26,7 @@ import java.util.UUID;
  * <p>
  * The showtime row is locked first (same as {@link HoldSeatsService} and seat confirm / release), so nobody can
  * hold a seat while the admin is changing the showtime. Changes are refused once any seat is sold or held by a
- * live hold: buyers paid for a given time and price, and refunds are not automated.
+ * live hold: buyers paid for a given time and price, and there is no refund flow.
  */
 @Service
 @RequiredArgsConstructor
@@ -42,12 +42,12 @@ public class ManageShowtimeService implements ManageShowtimeUseCase {
     @Override
     public Showtime update(UUID showtimeId, UpdateShowtimeCommand command) {
         if (command == null || (command.getStartTime() == null && command.getBasePrice() == null)) {
-            throw new InvalidShowtimeException("Nothing to update: give startTime and/or basePrice");
+            throw new InvalidShowtimeException("Không có gì để cập nhật: hãy gửi giờ chiếu và/hoặc giá vé");
         }
         Instant now = clock.instant();
         Showtime showtime = lock(showtimeId);
         showtime.assertEditable(now);
-        refuseIfSeatsTaken(showtime, now, "changed");
+        refuseIfSeatsTaken(showtime, now, "sửa");
 
         if (command.getStartTime() != null && !command.getStartTime().equals(showtime.getStartTime())) {
             showtime.reschedule(command.getStartTime(), now);
@@ -74,7 +74,7 @@ public class ManageShowtimeService implements ManageShowtimeUseCase {
         if (showtime.isCancelled()) {
             return showtime; // idempotent
         }
-        refuseIfSeatsTaken(showtime, now, "cancelled");
+        refuseIfSeatsTaken(showtime, now, "huỷ");
         showtime.cancel();
 
         List<ShowtimeSeat> seats = showtimeSeatRepositoryPort.findByShowtimeId(showtimeId);
@@ -91,8 +91,8 @@ public class ManageShowtimeService implements ManageShowtimeUseCase {
     private void refuseIfSeatsTaken(Showtime showtime, Instant now, String action) {
         long taken = showtimeSeatRepositoryPort.countTakenSeats(showtime.getId(), now);
         if (taken > 0) {
-            throw new ShowtimeConflictException("Showtime " + showtime.getId() + " has " + taken
-                    + " seat(s) held or sold and cannot be " + action);
+            throw new ShowtimeConflictException("Suất chiếu " + showtime.getId() + " có " + taken
+                    + " ghế đang được giữ hoặc đã bán nên không thể " + action);
         }
     }
 }
