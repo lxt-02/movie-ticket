@@ -4,6 +4,6 @@ import java.util.UUID;
 
 public class UserBlockedException extends DomainException {
     public UserBlockedException(UUID userId) {
-        super("User is blocked or inactive: " + userId);
+        super("Tài khoản đã bị khoá hoặc ngừng hoạt động: " + userId);
     }
 }
