@@ -1,0 +1,23 @@
+eureka:
+  client:
+    enabled: false
+
+spring:
+  kafka:
+    bootstrap-servers: localhost:9092
+    listener:
+      # No broker in unit tests: do not start the movie-events consumer.
+      auto-startup: false
+    admin:
+      auto-create: false
+
+search:
+  elasticsearch:
+    # No Elasticsearch in unit tests.
+    init-on-startup: false
+
+management:
+  tracing:
+    export:
+      zipkin:
+        enabled: false
