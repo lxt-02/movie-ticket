@@ -2,9 +2,10 @@ package com.mv.showtimeservice.infrastructure.adapter;
 
 import com.mv.showtimeservice.application.port.out.MovieClientPort;
 import com.mv.showtimeservice.infrastructure.client.MovieFeignClient;
-import com.mv.showtimeservice.infrastructure.client.dto.ApiResponse;
-import com.mv.showtimeservice.infrastructure.client.dto.MovieResponse;
+import com.mv.showtimeservice.infrastructure.client.dto.RemoteResponse;
+import com.mv.showtimeservice.infrastructure.client.dto.MovieDto;
 import lombok.RequiredArgsConstructor;
+import feign.FeignException;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -17,11 +18,18 @@ public class MovieClientAdapter implements MovieClientPort {
 
     @Override
     public MovieSnapshot getMovie(UUID movieId) {
-        ApiResponse<MovieResponse> response = movieFeignClient.getMovie(movieId);
-        if (response == null || !response.isSuccess() || response.getData() == null) {
-            throw new IllegalArgumentException("Movie " + movieId + " could not be loaded");
+        RemoteResponse<MovieDto> response;
+        try {
+            response = movieFeignClient.getMovie(movieId);
+        } catch (FeignException e) {
+            throw RemoteCalls.translate(e, "phim", "Không tìm thấy phim " + movieId);
+        } catch (RuntimeException e) {
+            throw RemoteCalls.unavailable("phim", e);
         }
-        MovieResponse movie = response.getData();
+        if (response == null || !response.isSuccess() || response.getData() == null) {
+            throw new IllegalArgumentException("Phim " + movieId + " không tải được");
+        }
+        MovieDto movie = response.getData();
         return new MovieSnapshot(
                 movie.getId(),
                 movie.getTitle(),

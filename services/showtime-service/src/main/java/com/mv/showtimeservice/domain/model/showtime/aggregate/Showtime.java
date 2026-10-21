@@ -45,10 +45,10 @@ public class Showtime {
     /** Start / price can only change for a SCHEDULED or SELLING showtime that has not started yet. */
     public void assertEditable(Instant now) {
         if (status == ShowtimeStatus.CANCELLED || status == ShowtimeStatus.ENDED) {
-            throw new InvalidShowtimeException("Showtime " + id + " is " + status + " and cannot be changed");
+            throw new InvalidShowtimeException("Suất chiếu " + id + " đang ở trạng thái " + status + " nên không thể thay đổi");
         }
         if (!startTime.isAfter(now)) {
-            throw new InvalidShowtimeException("Showtime " + id + " has already started");
+            throw new InvalidShowtimeException("Suất chiếu " + id + " đã bắt đầu chiếu");
         }
     }
 
@@ -56,7 +56,7 @@ public class Showtime {
     public void reschedule(Instant newStart, Instant now) {
         assertEditable(now);
         if (newStart == null || !newStart.isAfter(now)) {
-            throw new InvalidShowtimeException("startTime must be in the future");
+            throw new InvalidShowtimeException("Giờ chiếu phải ở tương lai");
         }
         Duration length = Duration.between(startTime, endTime);
         this.startTime = newStart;
@@ -66,7 +66,7 @@ public class Showtime {
     public void changeBasePrice(BigDecimal newBasePrice, Instant now) {
         assertEditable(now);
         if (newBasePrice == null || newBasePrice.signum() < 0) {
-            throw new InvalidShowtimeException("basePrice must be greater than or equal to 0");
+            throw new InvalidShowtimeException("Giá vé không được âm");
         }
         this.basePrice = newBasePrice;
     }
@@ -88,7 +88,7 @@ public class Showtime {
             return;
         }
         if (status == ShowtimeStatus.ENDED) {
-            throw new InvalidShowtimeException("Showtime " + id + " has ended and cannot be cancelled");
+            throw new InvalidShowtimeException("Suất chiếu " + id + " đã chiếu xong nên không thể huỷ");
         }
         this.status = ShowtimeStatus.CANCELLED;
     }
