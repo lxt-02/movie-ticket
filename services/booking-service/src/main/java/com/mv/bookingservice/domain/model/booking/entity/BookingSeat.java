@@ -28,16 +28,16 @@ public class BookingSeat {
 
     public static BookingSeat create(UUID bookingId, UUID showtimeSeatId, UUID seatId, String seatLabel, BigDecimal unitPrice) {
         if (showtimeSeatId == null) {
-            throw new BookingValidationException("showtimeSeatId must not be null");
+            throw new BookingValidationException("Ghế là bắt buộc");
         }
         if (seatId == null) {
-            throw new BookingValidationException("seatId must not be null");
+            throw new BookingValidationException("Thiếu mã ghế");
         }
         if (seatLabel == null || seatLabel.isBlank()) {
-            throw new BookingValidationException("seatLabel must not be blank");
+            throw new BookingValidationException("Thiếu tên ghế");
         }
         if (unitPrice == null || unitPrice.compareTo(BigDecimal.ZERO) < 0) {
-            throw new BookingValidationException("unitPrice must be greater than or equal to 0");
+            throw new BookingValidationException("Giá ghế không được âm");
         }
 
         String ticketCode = "TKT-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase();
@@ -56,7 +56,7 @@ public class BookingSeat {
 
     public void assignToBooking(UUID bookingId) {
         if (bookingId == null) {
-            throw new BookingValidationException("bookingId must not be null");
+            throw new BookingValidationException("Mã booking là bắt buộc");
         }
         this.bookingId = bookingId;
     }
@@ -67,9 +67,5 @@ public class BookingSeat {
 
     public void expire() {
         this.status = BookingSeatStatus.EXPIRED;
-    }
-
-    public void refund() {
-        this.status = BookingSeatStatus.REFUNDED;
     }
 }

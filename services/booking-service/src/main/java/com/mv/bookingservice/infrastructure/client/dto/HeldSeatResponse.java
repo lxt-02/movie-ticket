@@ -1,15 +1,18 @@
 package com.mv.bookingservice.infrastructure.client.dto;
 
+import java.math.BigDecimal;
+import java.util.UUID;
+
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.math.BigDecimal;
-import java.util.UUID;
-
+/** One seat of a hold, with its price for this showtime. */
 @Getter
 @Setter
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class HeldSeatResponse {

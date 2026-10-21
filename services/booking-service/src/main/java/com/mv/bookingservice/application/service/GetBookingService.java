@@ -39,9 +39,14 @@ public class GetBookingService implements GetBookingUseCase {
     }
 
     @Override
+    public List<Booking> getNeedingRefund() {
+        return loadBookingPort.findNeedingRefund();
+    }
+
+    @Override
     public List<Booking> getByUserId(GetUserBookingsQuery query) {
         if (query.getUserId() == null) {
-            throw new BookingValidationException("userId is required");
+            throw new BookingValidationException("Bạn cần đăng nhập");
         }
         return loadBookingPort.findByUserId(query.getUserId());
     }

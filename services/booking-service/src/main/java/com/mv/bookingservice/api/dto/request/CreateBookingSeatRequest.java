@@ -16,13 +16,13 @@ import java.util.UUID;
 @AllArgsConstructor
 public class CreateBookingSeatRequest {
 
-    @NotNull(message = "showtimeSeatId must not be null")
+    @NotNull(message = "Ghế là bắt buộc")
     private UUID showtimeSeatId;
 
     private UUID seatId;
 
     private String seatLabel;
 
-    @jakarta.validation.constraints.DecimalMin(value = "0.0", inclusive = true, message = "unitPrice must be greater than or equal to 0")
+    @jakarta.validation.constraints.DecimalMin(value = "0.0", inclusive = true, message = "Giá ghế không được âm")
     private java.math.BigDecimal unitPrice;
 }

@@ -40,13 +40,13 @@ public class CreateBookingService implements CreateBookingUseCase {
     @Transactional
     public Booking execute(CreateBookingCommand command) {
         if (command == null) {
-            throw new BookingValidationException("Create booking command must not be null");
+            throw new BookingValidationException("Thiếu dữ liệu đặt vé");
         }
         if (command.getUserId() == null) {
-            throw new BookingValidationException("userId must be provided by authenticated context");
+            throw new BookingValidationException("Bạn cần đăng nhập để đặt vé");
         }
         if (command.getIdempotencyKey() == null || command.getIdempotencyKey().isBlank()) {
-            throw new BookingValidationException("Idempotency-Key header is required when creating a booking");
+            throw new BookingValidationException("Thiếu header Idempotency-Key khi đặt vé");
         }
 
         Optional<Booking> existingBooking = loadBookingPort.findByUserIdAndIdempotencyKey(
@@ -58,12 +58,12 @@ public class CreateBookingService implements CreateBookingUseCase {
             if (command.getRequestHash() != null && command.getRequestHash().equals(existing.getRequestHash())) {
                 return existing;
             }
-            throw new BookingConflictException("Idempotency key reused with different request payload");
+            throw new BookingConflictException("Idempotency-Key đã được dùng cho một yêu cầu khác");
         }
 
         UserClientPort.UserValidationResult user = userClientPort.validateUser(command.getUserId());
         if (user == null || !"ACTIVE".equalsIgnoreCase(user.status())) {
-            throw new BookingValidationException("User is not active");
+            throw new BookingValidationException("Tài khoản không hoạt động hoặc đã bị khoá");
         }
 
         List<UUID> requestedSeatIds = extractShowtimeSeatIds(command.getSeats());
@@ -114,7 +114,7 @@ public class CreateBookingService implements CreateBookingUseCase {
 
     private List<UUID> extractShowtimeSeatIds(List<CreateBookingSeatCommand> seats) {
         if (seats == null || seats.isEmpty()) {
-            throw new BookingValidationException("Booking must contain at least one seat");
+            throw new BookingValidationException("Booking phải có ít nhất một ghế");
         }
         return seats.stream()
                 .map(CreateBookingSeatCommand::getShowtimeSeatId)
@@ -129,11 +129,11 @@ public class CreateBookingService implements CreateBookingUseCase {
      */
     private Instant paymentDeadline(ShowtimeClientPort.SeatHoldResult hold) {
         if (hold.expiresAt() == null) {
-            throw new BookingValidationException("Showtime did not return the seat hold expiry");
+            throw new BookingValidationException("Dịch vụ suất chiếu không trả về thời hạn giữ ghế");
         }
         Instant deadline = hold.expiresAt().minus(policy.holdSafetyMargin());
         if (!deadline.isAfter(Instant.now())) {
-            throw new BookingValidationException("Seat hold is too short to leave time for payment");
+            throw new BookingValidationException("Thời gian giữ ghế quá ngắn, không đủ để thanh toán");
         }
         return deadline;
     }
@@ -145,10 +145,10 @@ public class CreateBookingService implements CreateBookingUseCase {
 
     private List<BookingSeat> toBookingSeats(ShowtimeClientPort.SeatHoldResult hold) {
         if (hold == null || hold.holdId() == null) {
-            throw new BookingValidationException("Showtime did not return a valid seat hold");
+            throw new BookingValidationException("Dịch vụ suất chiếu không trả về lượt giữ ghế hợp lệ");
         }
         if (hold.seats() == null || hold.seats().isEmpty()) {
-            throw new BookingValidationException("Showtime did not return held seats");
+            throw new BookingValidationException("Dịch vụ suất chiếu không trả về danh sách ghế đã giữ");
         }
 
         List<BookingSeat> seats = new ArrayList<>();

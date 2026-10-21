@@ -15,10 +15,4 @@ public interface PaymentCommandPort {
 
     /** CANCEL_PAYMENT: close every open PayOS link of the booking (booking cancelled or expired). */
     void cancelPayments(Booking booking, String reason);
-
-    /**
-     * REFUND_PAYMENT: money was received for {@code paymentId} but the booking cannot use it (paid too late,
-     * booking already closed, seats lost, amount mismatch, duplicate payment). payment-service opens a refund.
-     */
-    void requestRefund(Booking booking, UUID paymentId, String reason);
 }

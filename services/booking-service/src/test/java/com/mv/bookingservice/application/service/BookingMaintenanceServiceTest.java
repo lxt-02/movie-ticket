@@ -4,6 +4,7 @@ import com.mv.bookingservice.application.dto.BookingPaymentPolicy;
 import com.mv.bookingservice.application.exception.SeatHoldRejectedException;
 import com.mv.bookingservice.application.port.out.LoadBookingPort;
 import com.mv.bookingservice.application.port.out.PaymentCommandPort;
+import com.mv.bookingservice.application.port.out.PaymentStatusPort;
 import com.mv.bookingservice.application.port.out.SaveBookingPort;
 import com.mv.bookingservice.application.port.out.ShowtimeClientPort;
 import com.mv.bookingservice.domain.model.booking.aggregate.Booking;
@@ -19,6 +20,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -40,13 +42,16 @@ class BookingMaintenanceServiceTest {
     private ShowtimeClientPort showtimeClientPort;
     @Mock
     private PaymentCommandPort paymentCommandPort;
+    @Mock
+    private PaymentStatusPort paymentStatusPort;
 
     private BookingMaintenanceService service;
 
     @BeforeEach
     void setUp() {
         service = new BookingMaintenanceService(loadBookingPort, saveBookingPort, showtimeClientPort, paymentCommandPort,
-                new SeatConfirmation(showtimeClientPort, paymentCommandPort), new BookingPaymentPolicy(3, Duration.ofSeconds(90), 50));
+                new SeatConfirmation(showtimeClientPort), new BookingPaymentPolicy(3, Duration.ofSeconds(90), 50),
+                paymentStatusPort);
     }
 
     private Booking booking(BookingStatus status, Instant expiresAt) {
@@ -102,27 +107,82 @@ class BookingMaintenanceServiceTest {
     }
 
     @Test
-    void rejectedSeatsMoveBookingToRefundInsteadOfRetryingForever() {
+    void rejectedSeatsCancelBookingInsteadOfRetryingForever() {
         Booking confirming = booking(BookingStatus.CONFIRMING, Instant.now().minusSeconds(60));
         when(loadBookingPort.findConfirmingForUpdate(50)).thenReturn(List.of(confirming));
         when(showtimeClientPort.confirmHold(confirming.getHoldId()))
                 .thenThrow(new SeatHoldRejectedException("hold expired"));
 
         assertEquals(0, service.retrySeatConfirmations());
-        assertEquals(BookingStatus.REFUND_PENDING, confirming.getStatus());
+        assertEquals(BookingStatus.CANCELLED, confirming.getStatus());
         verify(saveBookingPort).save(confirming);
-        verify(paymentCommandPort).requestRefund(eq(confirming), eq(confirming.getPaidPaymentId()), any());
+        verify(showtimeClientPort).releaseHold(confirming.getHoldId());
     }
 
     @Test
-    void showtimeDownForTooLongMovesBookingToRefund() {
+    void showtimeDownForTooLongCancelsBooking() {
         Booking confirming = booking(BookingStatus.CONFIRMING, Instant.now().minusSeconds(3600));
         confirming.setUpdatedAt(Instant.now().minus(Duration.ofMinutes(31)));
         when(loadBookingPort.findConfirmingForUpdate(50)).thenReturn(List.of(confirming));
         when(showtimeClientPort.confirmHold(confirming.getHoldId())).thenThrow(new RuntimeException("down"));
 
         assertEquals(0, service.retrySeatConfirmations());
-        assertEquals(BookingStatus.REFUND_PENDING, confirming.getStatus());
+        assertEquals(BookingStatus.CANCELLED, confirming.getStatus());
         verify(saveBookingPort).save(confirming);
+    }
+
+    @Test
+    void paidBookingWhoseEventWasLostIsConfirmedInsteadOfExpired() {
+        Booking overdue = booking(BookingStatus.PENDING, Instant.now().minusSeconds(120));
+        UUID paymentId = UUID.randomUUID();
+        when(loadBookingPort.findOverduePendingForUpdate(any(), eq(50))).thenReturn(List.of(overdue));
+        when(paymentStatusPort.findSucceededPayment(overdue.getId())).thenReturn(Optional.of(
+                new PaymentStatusPort.PaidPayment(paymentId, new BigDecimal("150000"), "VND",
+                        Instant.now().minusSeconds(200))));
+
+        int expired = service.expireOverdueBookings();
+
+        assertEquals(0, expired);
+        assertEquals(BookingStatus.CONFIRMED, overdue.getStatus());
+        assertEquals(paymentId, overdue.getPaidPaymentId());
+        verify(showtimeClientPort).confirmHold(overdue.getHoldId());
+        verify(saveBookingPort).save(overdue);
+        verify(paymentCommandPort, never()).cancelPayments(any(), any());
+    }
+
+    @Test
+    void expiryIsPostponedWhenPaymentServiceIsDownAndSeatsAreStillHeld() {
+        Booking overdue = booking(BookingStatus.PENDING, Instant.now().minusSeconds(100));
+        when(loadBookingPort.findOverduePendingForUpdate(any(), eq(50))).thenReturn(List.of(overdue));
+        when(paymentStatusPort.findSucceededPayment(overdue.getId())).thenThrow(new RuntimeException("down"));
+
+        assertEquals(0, service.expireOverdueBookings());
+        assertEquals(BookingStatus.PENDING, overdue.getStatus());
+        verify(saveBookingPort, never()).save(any());
+    }
+
+    @Test
+    void bookingExpiresWhenPaymentServiceIsDownAndSeatHoldIsOver() {
+        Booking overdue = booking(BookingStatus.PENDING, Instant.now().minusSeconds(600));
+        when(loadBookingPort.findOverduePendingForUpdate(any(), eq(50))).thenReturn(List.of(overdue));
+        when(paymentStatusPort.findSucceededPayment(overdue.getId())).thenThrow(new RuntimeException("down"));
+        when(saveBookingPort.save(overdue)).thenReturn(overdue);
+
+        assertEquals(1, service.expireOverdueBookings());
+        assertEquals(BookingStatus.EXPIRED, overdue.getStatus());
+    }
+
+    @Test
+    void paymentAfterDeadlineIsFlaggedForRefundAndBookingExpires() {
+        Booking overdue = booking(BookingStatus.PENDING, Instant.now().minusSeconds(120));
+        when(loadBookingPort.findOverduePendingForUpdate(any(), eq(50))).thenReturn(List.of(overdue));
+        when(paymentStatusPort.findSucceededPayment(overdue.getId())).thenReturn(Optional.of(
+                new PaymentStatusPort.PaidPayment(UUID.randomUUID(), new BigDecimal("150000"), "VND",
+                        Instant.now().minusSeconds(10))));
+        when(saveBookingPort.save(overdue)).thenReturn(overdue);
+
+        assertEquals(1, service.expireOverdueBookings());
+        assertEquals(BookingStatus.EXPIRED, overdue.getStatus());
+        assertTrue(overdue.isNeedsRefund());
     }
 }

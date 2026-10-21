@@ -2,7 +2,7 @@ package com.mv.bookingservice.application.exception;
 
 /**
  * Showtime refused to confirm a hold for good (409 / 404: hold released or expired, seat taken by someone else).
- * Unlike a timeout or a 5xx, retrying cannot succeed, so a paid booking has to be refunded.
+ * Unlike a timeout or a 5xx, retrying cannot succeed, so the paid booking is cancelled (handled manually).
  */
 public class SeatHoldRejectedException extends RuntimeException {
     public SeatHoldRejectedException(String message) {

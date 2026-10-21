@@ -20,7 +20,7 @@ public interface ShowtimeClientPort {
      * Turns the held seats into BOOKED.
      *
      * @throws com.mv.bookingservice.application.exception.SeatHoldRejectedException if Showtime refuses for good
-     *         (hold released/expired, seats taken): do not retry, refund instead
+     *         (hold released/expired, seats taken): do not retry, cancel the booking instead
      * @throws RuntimeException any other failure (timeout, 5xx) is temporary and may be retried
      */
     SeatHoldResult confirmHold(UUID holdId);

@@ -106,6 +106,12 @@ public class BookingEntity {
     @Column(name = "payment_attempt", nullable = false)
     private Integer paymentAttempt;
 
+    @Column(name = "needs_refund", nullable = false)
+    private boolean needsRefund;
+
+    @Column(name = "refund_note", length = 500)
+    private String refundNote;
+
     @Builder.Default
     @OneToMany(mappedBy = "booking", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<BookingSeatEntity> seats = new ArrayList<>();

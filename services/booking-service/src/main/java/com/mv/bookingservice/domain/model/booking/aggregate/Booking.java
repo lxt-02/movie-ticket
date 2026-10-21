@@ -49,6 +49,12 @@ public class Booking {
     private Instant updatedAt;
     /** 1 for the first payment link; incremented by each "pay again". */
     private Integer paymentAttempt;
+    /**
+     * Money was received that this booking cannot use (paid late / twice / wrong amount, seats lost after payment).
+     * No refund flow in this system: the flag lists the case for manual handling.
+     */
+    private boolean needsRefund;
+    private String refundNote;
 
     @Builder.Default
     private List<BookingSeat> seats = new ArrayList<>();
@@ -103,31 +109,31 @@ public class Booking {
             List<BookingSeat> seats
     ) {
         if (bookingId == null) {
-            throw new BookingValidationException("bookingId must not be null");
+            throw new BookingValidationException("Mã booking là bắt buộc");
         }
         if (userId == null) {
-            throw new BookingValidationException("userId must not be null");
+            throw new BookingValidationException("Người dùng là bắt buộc");
         }
         if (showtimeId == null) {
-            throw new BookingValidationException("showtimeId must not be null");
+            throw new BookingValidationException("Suất chiếu là bắt buộc");
         }
         if (movieTitle == null || movieTitle.isBlank()) {
-            throw new BookingValidationException("movieTitle must not be blank");
+            throw new BookingValidationException("Thiếu tên phim");
         }
         if (cinemaName == null || cinemaName.isBlank()) {
-            throw new BookingValidationException("cinemaName must not be blank");
+            throw new BookingValidationException("Thiếu tên rạp");
         }
         if (screenName == null || screenName.isBlank()) {
-            throw new BookingValidationException("screenName must not be blank");
+            throw new BookingValidationException("Thiếu tên phòng");
         }
         if (startTime == null) {
-            throw new BookingValidationException("startTime must not be null");
+            throw new BookingValidationException("Thiếu giờ chiếu");
         }
         if (holdId == null) {
-            throw new BookingValidationException("holdId must not be null");
+            throw new BookingValidationException("Thiếu lượt giữ ghế");
         }
         if (seats == null || seats.isEmpty()) {
-            throw new BookingValidationException("Booking must contain at least one seat");
+            throw new BookingValidationException("Booking phải có ít nhất một ghế");
         }
 
         String bookingCode = generateBookingCode();
@@ -135,17 +141,17 @@ public class Booking {
 
         BigDecimal actualDiscount = discountAmount != null ? discountAmount : BigDecimal.ZERO;
         if (actualDiscount.compareTo(BigDecimal.ZERO) < 0) {
-            throw new BookingValidationException("discountAmount cannot be negative");
+            throw new BookingValidationException("Tiền giảm giá không được âm");
         }
 
         BigDecimal calculatedSubtotal = BigDecimal.ZERO;
         Set<UUID> showtimeSeatIds = new HashSet<>();
         for (BookingSeat seat : seats) {
             if (seat == null) {
-                throw new BookingValidationException("Booking seat must not be null");
+                throw new BookingValidationException("Thiếu thông tin ghế");
             }
             if (!showtimeSeatIds.add(seat.getShowtimeSeatId())) {
-                throw new BookingValidationException("Duplicate showtimeSeatId in booking: " + seat.getShowtimeSeatId());
+                throw new BookingValidationException("Ghế bị chọn trùng: " + seat.getShowtimeSeatId());
             }
             seat.assignToBooking(bookingId);
             calculatedSubtotal = calculatedSubtotal.add(seat.getUnitPrice());
@@ -194,10 +200,10 @@ public class Booking {
             throw new InvalidBookingStateException(status, "retryPayment");
         }
         if (isExpired()) {
-            throw new InvalidBookingStateException("Booking has already expired");
+            throw new InvalidBookingStateException("Booking đã hết hạn");
         }
         if (currentPaymentAttempt() >= maxAttempts) {
-            throw new BookingValidationException("Maximum payment attempts reached (" + maxAttempts + ")");
+            throw new BookingValidationException("Đã vượt quá số lần thanh toán cho phép (" + maxAttempts + ")");
         }
         this.paymentAttempt = currentPaymentAttempt() + 1;
         this.updatedAt = Instant.now();
@@ -217,7 +223,7 @@ public class Booking {
             throw new InvalidBookingStateException(status, "markConfirming");
         }
         if (!wasPaidInTime(paidAt)) {
-            throw new InvalidBookingStateException("Payment arrived after the booking expired");
+            throw new InvalidBookingStateException("Thanh toán đến sau khi booking đã hết hạn");
         }
         this.status = BookingStatus.CONFIRMING;
         this.paidPaymentId = paymentId;
@@ -226,7 +232,7 @@ public class Booking {
 
     public void markConfirming(UUID paymentId) {
         if (isExpired()) {
-            throw new InvalidBookingStateException("Booking has already expired");
+            throw new InvalidBookingStateException("Booking đã hết hạn");
         }
         if (status != BookingStatus.PENDING) {
             throw new InvalidBookingStateException(status, "markConfirming");
@@ -267,21 +273,28 @@ public class Booking {
         this.seats.forEach(BookingSeat::expire);
     }
 
-    public void requestRefund() {
-        if (status != BookingStatus.PENDING && status != BookingStatus.CONFIRMING && status != BookingStatus.CONFIRMED) {
-            throw new InvalidBookingStateException(status, "requestRefund");
+    /**
+     * Paid, but the seats could not be booked (hold expired / seats lost / Showtime down too long):
+     * CONFIRMING -> CANCELLED. There is no refund flow; the payment stays SUCCESS and the case is handled manually.
+     */
+    public void failAfterPayment() {
+        if (status != BookingStatus.CONFIRMING) {
+            throw new InvalidBookingStateException(status, "failAfterPayment");
         }
-        this.status = BookingStatus.REFUND_PENDING;
+        this.status = BookingStatus.CANCELLED;
+        this.cancelledAt = Instant.now();
         this.updatedAt = Instant.now();
+        this.seats.forEach(BookingSeat::cancel);
     }
 
-    public void markRefunded() {
-        if (status != BookingStatus.REFUND_PENDING && status != BookingStatus.CONFIRMED) {
-            throw new InvalidBookingStateException(status, "markRefunded");
-        }
-        this.status = BookingStatus.REFUNDED;
-        this.updatedAt = Instant.now();
-        this.seats.forEach(BookingSeat::refund);
+    /**
+     * Marks money that this booking cannot use, for manual refund. Does not change the status and does not touch
+     * {@code updatedAt} (the CONFIRMING timeout is measured from it).
+     */
+    public void flagForRefund(String note) {
+        this.needsRefund = true;
+        String text = note == null ? "" : note;
+        this.refundNote = text.length() > 500 ? text.substring(0, 500) : text;
     }
 
     public boolean isExpired() {

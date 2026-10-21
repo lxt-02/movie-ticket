@@ -4,7 +4,7 @@ import com.mv.bookingservice.application.exception.DependencyUnavailableExceptio
 import com.mv.bookingservice.application.exception.SeatHoldRejectedException;
 import com.mv.bookingservice.domain.model.booking.exception.BookingConflictException;
 import com.mv.bookingservice.infrastructure.client.ShowtimeFeignClient;
-import com.mv.bookingservice.infrastructure.client.dto.ApiResponse;
+import com.mv.bookingservice.infrastructure.client.dto.RemoteResponse;
 import com.mv.bookingservice.infrastructure.client.dto.SeatHoldResponse;
 import com.mv.bookingservice.infrastructure.resilience.CircuitBreakerProperties;
 import com.mv.bookingservice.infrastructure.resilience.ResilienceConfig;
@@ -103,7 +103,7 @@ class ShowtimeClientAdapterCircuitBreakerTest {
         SeatHoldResponse released = new SeatHoldResponse();
         released.setHoldId(holdId);
         released.setStatus("RELEASED");
-        ApiResponse<SeatHoldResponse> ok = new ApiResponse<>();
+        RemoteResponse<SeatHoldResponse> ok = new RemoteResponse<>();
         ok.setSuccess(true);
         ok.setData(released);
         when(feignClient.releaseHold(holdId)).thenReturn(ok);

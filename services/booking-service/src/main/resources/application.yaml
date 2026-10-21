@@ -39,6 +39,9 @@ spring:
           user-service:
             connect-timeout: 2000
             read-timeout: 3000
+          payment-service:
+            connect-timeout: 2000
+            read-timeout: 3000
 
   flyway:
     enabled: true
@@ -47,6 +50,11 @@ spring:
 
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    # Trace context in Kafka headers: the consumer span joins the producer's trace.
+    template:
+      observation-enabled: true
+    listener:
+      observation-enabled: true
     producer:
       acks: all
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
@@ -68,6 +76,17 @@ booking:
       failure-rate-threshold: 50        # >= 50% failed -> OPEN
       wait-duration-in-open-seconds: 20 # OPEN rejects calls for 20s, then HALF_OPEN
       permitted-calls-in-half-open: 3   # 3 trial calls; all OK -> CLOSED, any failure -> OPEN again
+    retry:
+      # Retry -> CircuitBreaker -> Bulkhead -> Feign. Only quick technical failures are retried:
+      # connection refused / 502 / 503 / 504. Never: read timeout (slow service), 4xx, breaker OPEN, bulkhead full.
+      max-attempts: 3                   # 1st try + 2 retries (1 = no retry)
+      wait-millis: 300                  # 300ms, then 600ms (exponential backoff)
+      multiplier: 2
+    bulkhead:
+      # At most 20 calls to showtime (and 20 to user) at the same time; others wait up to 500ms, then 503.
+      # A slow showtime can then never take every request thread of booking-service.
+      max-concurrent-calls: 20
+      max-wait-millis: 500
   scheduling:
     enabled: true
   payment:
@@ -84,7 +103,7 @@ booking:
   confirmation-retry:
     delay-ms: 60000
     initial-delay-ms: 45000
-    # A paid booking whose seats still are not confirmed after this long moves to REFUND_PENDING.
+    # A paid booking whose seats still are not confirmed after this long is CANCELLED (no refund flow).
     timeout-minutes: 30
   kafka:
     payment-commands: payment-commands
@@ -93,12 +112,21 @@ booking:
     relay-initial-delay-ms: 3000
     relay-batch-size: 50
     publish-timeout-ms: 5000
+    # A payment event that fails for a technical reason is retried (1s, 2s, 4s ... max 10s) for 60s,
+    # then parked in payment-events.DLT instead of being skipped. Replay: POST /api/v1/bookings/admin/payment-events-dlt/replay
+    event-retry-max-interval-ms: 10000
+    event-retry-max-elapsed-ms: ${BOOKING_EVENT_RETRY_MAX_ELAPSED_MS:60000}
+  demo:
+    # DEMO ONLY: allows POST /api/v1/bookings/admin/chaos/payment-events?fail=true (simulated outage). Keep false otherwise.
+    chaos-enabled: ${BOOKING_DEMO_CHAOS_ENABLED:false}
 
 clients:
   showtime:
     base-url: ${SHOWTIME_SERVICE_URL}
   user:
     base-url: ${USER_SERVICE_URL}
+  payment:
+    base-url: ${PAYMENT_SERVICE_URL:}
 
 eureka:
   client:
@@ -106,13 +134,34 @@ eureka:
       defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE}
   instance:
     prefer-ip-address: true
-    instance-id: ${spring.application.name}:${server.port}
+    # IP in the ID: several instances on the same port (docker compose --scale) stay distinct in Eureka.
+    instance-id: ${EUREKA_INSTANCE_ID:${spring.application.name}:${spring.cloud.client.ip-address}:${server.port}}
+
+logging:
+  pattern:
+    # Correlation ID of the request (X-Correlation-Id) in every log line
+    correlation: '[cid=%X{correlationId:-} trace=%X{traceId:-}] '
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: always
+  tracing:
+    sampling:
+      # Every request is traced (demo). Lower it in production (e.g. 0.1).
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+    export:
+      zipkin:
+        endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+  # Same setting under its Spring Boot 3 name (ignored if unknown).
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+  metrics:
+    tags:
+      # Every metric carries the service name (Grafana filter).
+      application: ${spring.application.name}

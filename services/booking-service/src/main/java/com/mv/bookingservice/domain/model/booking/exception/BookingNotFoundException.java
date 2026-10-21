@@ -4,10 +4,10 @@ import java.util.UUID;
 
 public class BookingNotFoundException extends DomainException {
     public BookingNotFoundException(UUID bookingId) {
-        super("Booking not found with id: " + bookingId);
+        super("Không tìm thấy booking có id: " + bookingId);
     }
 
     public BookingNotFoundException(String bookingCode) {
-        super("Booking not found with code: " + bookingCode);
+        super("Không tìm thấy booking có mã: " + bookingCode);
     }
 }

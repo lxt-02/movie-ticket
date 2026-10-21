@@ -31,7 +31,7 @@ public class CancelBookingService implements CancelBookingUseCase {
                 .orElseThrow(() -> new BookingNotFoundException(command.getBookingId()));
 
         if (command.getUserId() == null || !command.getUserId().equals(booking.getUserId())) {
-            throw new BookingValidationException("Access denied to cancel this booking");
+            throw new BookingValidationException("Bạn không có quyền huỷ booking này");
         }
 
         booking.cancel();
