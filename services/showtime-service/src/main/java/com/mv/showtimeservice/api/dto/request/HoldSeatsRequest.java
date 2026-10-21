@@ -11,6 +11,7 @@ import lombok.Setter;
 import java.util.List;
 import java.util.UUID;
 
+/** Body of holdSeats. */
 @Getter
 @Setter
 @Builder
@@ -18,9 +19,9 @@ import java.util.UUID;
 @AllArgsConstructor
 public class HoldSeatsRequest {
 
-    @NotNull(message = "bookingId must not be null")
+    @NotNull(message = "Mã booking là bắt buộc")
     private UUID bookingId;
 
-    @NotEmpty(message = "showtimeSeatIds must not be empty")
+    @NotEmpty(message = "Phải chọn ít nhất một ghế")
     private List<UUID> showtimeSeatIds;
 }

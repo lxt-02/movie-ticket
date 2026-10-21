@@ -19,9 +19,9 @@ import java.time.Instant;
 @AllArgsConstructor
 public class UpdateShowtimeRequest {
 
-    @Future(message = "startTime must be in the future")
+    @Future(message = "Giờ chiếu phải ở tương lai")
     private Instant startTime;
 
-    @DecimalMin(value = "0.00", message = "basePrice must be greater than or equal to 0")
+    @DecimalMin(value = "0.00", message = "Giá vé không được âm")
     private BigDecimal basePrice;
 }

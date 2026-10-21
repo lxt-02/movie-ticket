@@ -41,7 +41,7 @@ public class ReleaseHoldService implements ReleaseHoldUseCase {
             return hold; // Idempotent release
         }
         if (hold.getStatus() == SeatHoldStatus.CONFIRMED) {
-            throw new SeatHoldConflictException("Hold " + hold.getId() + " is CONFIRMED, its seats are booked");
+            throw new SeatHoldConflictException("Lượt giữ ghế " + hold.getId() + " đã xác nhận (CONFIRMED), ghế đã được bán");
         }
 
         List<ShowtimeSeat> owned = locked.seats().stream()

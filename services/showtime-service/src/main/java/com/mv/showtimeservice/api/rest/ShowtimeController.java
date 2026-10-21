@@ -71,10 +71,9 @@ public class ShowtimeController {
             @RequestParam(required = false) Instant to,
             @RequestParam(required = false) List<ShowtimeStatus> status,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestHeader(value = AdminAccess.ROLE_HEADER, required = false) String role
+            @RequestParam(defaultValue = "20") int size
     ) {
-        boolean admin = AdminAccess.isAdmin(role);
+        boolean admin = AdminAccess.isAdmin();
         Instant now = clock.instant();
         if (date != null) {
             from = date.atStartOfDay(VIETNAM).toInstant();
@@ -117,10 +116,9 @@ public class ShowtimeController {
 
     @PostMapping
     public ResponseEntity<ApiResponse<ShowtimeResponse>> createShowtime(
-            @RequestHeader(value = AdminAccess.ROLE_HEADER, required = false) String role,
             @Valid @RequestBody CreateShowtimeRequest request
     ) {
-        AdminAccess.require(role);
+        AdminAccess.require();
         Showtime showtime = createShowtimeUseCase.execute(CreateShowtimeCommand.builder()
                 .movieId(request.getMovieId())
                 .cinemaId(request.getCinemaId())
@@ -136,10 +134,9 @@ public class ShowtimeController {
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<ShowtimeResponse>> update(
             @PathVariable UUID id,
-            @RequestHeader(value = AdminAccess.ROLE_HEADER, required = false) String role,
             @Valid @RequestBody UpdateShowtimeRequest request
     ) {
-        AdminAccess.require(role);
+        AdminAccess.require();
         Showtime showtime = manageShowtimeUseCase.update(id, UpdateShowtimeCommand.builder()
                 .startTime(request.getStartTime())
                 .basePrice(request.getBasePrice())
@@ -150,10 +147,9 @@ public class ShowtimeController {
     /** Soft delete: CANCELLED and every seat BLOCKED. 409 while seats are held or sold. */
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<ShowtimeResponse>> cancel(
-            @PathVariable UUID id,
-            @RequestHeader(value = AdminAccess.ROLE_HEADER, required = false) String role
+            @PathVariable UUID id
     ) {
-        AdminAccess.require(role);
+        AdminAccess.require();
         Showtime showtime = manageShowtimeUseCase.cancel(id);
         return ResponseEntity.ok(ApiResponse.success("Showtime cancelled", toResponse(showtime)));
     }

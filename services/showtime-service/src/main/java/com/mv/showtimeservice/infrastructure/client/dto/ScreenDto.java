@@ -1,15 +1,23 @@
 package com.mv.showtimeservice.infrastructure.client.dto;
 
-import lombok.Getter;
-import lombok.Setter;
-
 import java.util.UUID;
 
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+/** A screen. status: ACTIVE / MAINTENANCE / INACTIVE. */
 @Getter
 @Setter
-public class ScreenResponse {
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ScreenDto {
     private UUID id;
     private UUID cinemaId;
+    private UUID screenTypeId;
     private String screenTypeName;
     private String name;
     private int totalSeats;

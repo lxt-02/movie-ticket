@@ -1,7 +1,7 @@
 package com.mv.showtimeservice.api.mapper;
 
-import com.mv.showtimeservice.api.dto.request.HoldSeatsRequest;
 import com.mv.showtimeservice.api.dto.response.HeldSeatResponse;
+import com.mv.showtimeservice.api.dto.request.HoldSeatsRequest;
 import com.mv.showtimeservice.api.dto.response.SeatHoldResponse;
 import com.mv.showtimeservice.application.command.HoldSeatsCommand;
 import com.mv.showtimeservice.application.port.in.HoldSeatsResult;
@@ -64,7 +64,7 @@ public class ShowtimeDtoMapper {
                 .holdId(hold.getId())
                 .bookingId(hold.getBookingId())
                 .showtimeId(hold.getShowtimeId())
-                .status(hold.getStatus())
+                .status(hold.getStatus() != null ? hold.getStatus().name() : null)
                 .expiresAt(hold.getExpiresAt())
                 .movieTitle(showtime != null ? showtime.getMovieTitle() : null)
                 .cinemaName(showtime != null ? showtime.getCinemaName() : null)
@@ -90,7 +90,7 @@ public class ShowtimeDtoMapper {
                 .holdId(hold.getId())
                 .bookingId(hold.getBookingId())
                 .showtimeId(hold.getShowtimeId())
-                .status(hold.getStatus())
+                .status(hold.getStatus() != null ? hold.getStatus().name() : null)
                 .expiresAt(hold.getExpiresAt())
                 .movieTitle(showtime != null ? showtime.getMovieTitle() : null)
                 .cinemaName(showtime != null ? showtime.getCinemaName() : null)

@@ -7,6 +7,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -36,6 +37,24 @@ public interface ShowtimeJpaRepository extends JpaRepository<ShowtimeEntity, UUI
                               @Param("to") Instant to,
                               @Param("excludeId") UUID excludeId,
                               @Param("cancelled") ShowtimeStatus cancelled);
+
+    /** SCHEDULED -> SELLING once the sales window opens (start - window <= now), for showtimes not started yet. */
+    @Modifying
+    @Query("""
+            UPDATE ShowtimeEntity s SET s.status = :selling
+            WHERE s.status = :scheduled AND s.startTime <= :opensBefore AND s.startTime > :now
+            """)
+    int openSales(@Param("opensBefore") Instant opensBefore, @Param("now") Instant now,
+                  @Param("scheduled") ShowtimeStatus scheduled, @Param("selling") ShowtimeStatus selling);
+
+    /** SCHEDULED / SELLING -> ENDED after the end time. */
+    @Modifying
+    @Query("""
+            UPDATE ShowtimeEntity s SET s.status = :ended
+            WHERE s.status IN :running AND s.endTime < :now
+            """)
+    int endFinished(@Param("now") Instant now, @Param("running") Collection<ShowtimeStatus> running,
+                    @Param("ended") ShowtimeStatus ended);
 
     @Query("""
             SELECT s FROM ShowtimeEntity s
