@@ -1,0 +1,13 @@
+# Keep the build context small and never bake local secrets (.env) into the image.
+**/target/
+**/.env
+**/.idea/
+**/*.iml
+.git/
+.idea/
+docs/
+rule/
+infras/keycloak/
+infras/observability/
+**/node_modules/
+_claude_src.tgz
