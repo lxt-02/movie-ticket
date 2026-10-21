@@ -101,6 +101,8 @@ public class BookingDtoMapper {
                 .paidPaymentId(booking.getPaidPaymentId())
                 .version(booking.getVersion())
                 .updatedAt(booking.getUpdatedAt())
+                .needsRefund(booking.isNeedsRefund())
+                .refundNote(booking.getRefundNote())
                 .seats(seats)
                 .build();
     }

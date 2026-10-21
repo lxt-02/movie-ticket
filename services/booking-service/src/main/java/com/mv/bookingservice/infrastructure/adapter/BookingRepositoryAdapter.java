@@ -84,6 +84,13 @@ public class BookingRepositoryAdapter implements BookingRepository, SaveBookingP
     }
 
     @Override
+    public List<Booking> findNeedingRefund() {
+        return bookingJpaRepository.findByNeedsRefundTrueOrderByUpdatedAtDesc().stream()
+                .map(bookingPersistenceMapper::toDomain)
+                .collect(Collectors.toList());
+    }
+
+    @Override
     public boolean existsById(UUID id) {
         return bookingJpaRepository.existsById(id);
     }

@@ -4,16 +4,19 @@ import com.mv.bookingservice.application.exception.SeatHoldRejectedException;
 import com.mv.bookingservice.application.port.out.ShowtimeClientPort;
 import com.mv.bookingservice.domain.model.booking.exception.BookingConflictException;
 import com.mv.bookingservice.domain.model.booking.exception.BookingValidationException;
+import com.mv.bookingservice.infrastructure.client.FeignErrors;
 import com.mv.bookingservice.infrastructure.client.ShowtimeFeignClient;
-import com.mv.bookingservice.infrastructure.client.dto.ApiResponse;
+import com.mv.bookingservice.infrastructure.client.dto.RemoteResponse;
 import com.mv.bookingservice.infrastructure.client.dto.HeldSeatResponse;
 import com.mv.bookingservice.infrastructure.client.dto.HoldSeatsRequest;
 import com.mv.bookingservice.infrastructure.client.dto.SeatHoldResponse;
 import com.mv.bookingservice.infrastructure.resilience.ResilienceConfig;
-import com.mv.bookingservice.infrastructure.resilience.ResilientCall;
+import com.mv.bookingservice.infrastructure.resilience.RemoteCallGuard;
 import feign.FeignException;
-import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.bulkhead.BulkheadRegistry;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import io.github.resilience4j.retry.RetryRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -34,11 +37,27 @@ public class ShowtimeClientAdapter implements ShowtimeClientPort {
     private static final String SERVICE = "showtime-service";
 
     private final ShowtimeFeignClient showtimeFeignClient;
-    private final CircuitBreaker circuitBreaker;
+    private final RemoteCallGuard guard;
 
-    public ShowtimeClientAdapter(ShowtimeFeignClient showtimeFeignClient, CircuitBreakerRegistry registry) {
+    /** Retry → CircuitBreaker → Bulkhead, all named "showtime". */
+    @Autowired
+    public ShowtimeClientAdapter(ShowtimeFeignClient showtimeFeignClient, CircuitBreakerRegistry breakers, RetryRegistry retries,
+                 BulkheadRegistry bulkheads) {
         this.showtimeFeignClient = showtimeFeignClient;
-        this.circuitBreaker = registry.circuitBreaker(ResilienceConfig.SHOWTIME);
+        this.guard = new RemoteCallGuard(SERVICE, breakers.circuitBreaker(ResilienceConfig.SHOWTIME),
+                retries.retry(ResilienceConfig.SHOWTIME), bulkheads.bulkhead(ResilienceConfig.SHOWTIME));
+    }
+
+    /** Circuit breaker only (unit tests of the breaker). */
+    public ShowtimeClientAdapter(ShowtimeFeignClient showtimeFeignClient, CircuitBreakerRegistry breakers) {
+        this.showtimeFeignClient = showtimeFeignClient;
+        this.guard = RemoteCallGuard.breakerOnly(SERVICE, breakers.circuitBreaker(ResilienceConfig.SHOWTIME));
+    }
+
+    /** Any combination, for tests. */
+    public ShowtimeClientAdapter(ShowtimeFeignClient showtimeFeignClient, RemoteCallGuard guard) {
+        this.showtimeFeignClient = showtimeFeignClient;
+        this.guard = guard;
     }
 
     @Override
@@ -48,16 +67,19 @@ public class ShowtimeClientAdapter implements ShowtimeClientPort {
                 .showtimeSeatIds(showtimeSeatIds)
                 .build();
 
-        return ResilientCall.run(circuitBreaker, SERVICE, () -> {
-            ApiResponse<SeatHoldResponse> response;
+        return guard.call(() -> {
+            RemoteResponse<SeatHoldResponse> response;
             try {
                 response = showtimeFeignClient.holdSeats(showtimeId, request);
             } catch (FeignException e) {
+                // Business answers keep showtime's Vietnamese message ("Ghế A3 vừa có người khác chọn"...).
                 if (e.status() == 409) {
-                    throw new BookingConflictException("Selected seats are no longer available");
+                    throw new BookingConflictException(FeignErrors.messageOr(e,
+                            "Ghế bạn chọn vừa có người khác giữ, vui lòng chọn ghế khác"));
                 }
                 if (e.status() == 404 || e.status() == 400) {
-                    throw new BookingValidationException("Showtime or seats not found / not bookable");
+                    throw new BookingValidationException(FeignErrors.messageOr(e,
+                            "Suất chiếu hoặc ghế không tồn tại / không đặt được"));
                 }
                 throw e;
             }
@@ -67,20 +89,20 @@ public class ShowtimeClientAdapter implements ShowtimeClientPort {
 
     @Override
     public SeatHoldResult getHoldByBookingId(UUID bookingId) {
-        return ResilientCall.run(circuitBreaker, SERVICE, () ->
+        return guard.call(() ->
                 toSeatHoldResult(requireData(showtimeFeignClient.getHoldByBookingId(bookingId), "get hold by booking")));
     }
 
     @Override
     public SeatHoldResult releaseHold(UUID holdId) {
-        return ResilientCall.run(circuitBreaker, SERVICE, () ->
+        return guard.call(() ->
                 toSeatHoldResult(requireData(showtimeFeignClient.releaseHold(holdId), "release hold")));
     }
 
     @Override
     public SeatHoldResult confirmHold(UUID holdId) {
-        return ResilientCall.run(circuitBreaker, SERVICE, () -> {
-            ApiResponse<SeatHoldResponse> response;
+        return guard.call(() -> {
+            RemoteResponse<SeatHoldResponse> response;
             try {
                 response = showtimeFeignClient.confirmHold(holdId);
             } catch (FeignException e) {
@@ -127,7 +149,7 @@ public class ShowtimeClientAdapter implements ShowtimeClientPort {
         );
     }
 
-    private SeatHoldResponse requireData(ApiResponse<SeatHoldResponse> response, String action) {
+    private SeatHoldResponse requireData(RemoteResponse<SeatHoldResponse> response, String action) {
         if (response == null || !response.isSuccess() || response.getData() == null) {
             String message = response != null ? response.getMessage() : "empty response";
             throw new IllegalStateException("Showtime service failed to " + action + ": " + message);
