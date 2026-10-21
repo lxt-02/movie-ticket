@@ -9,6 +9,7 @@ import lombok.Setter;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 @Getter
@@ -28,6 +29,13 @@ public class MovieResponse {
     private String country;
     private String posterUrl;
     private MovieStatus status;
+    private List<GenreResponse> genres;
+    private List<PersonRef> directors;
+    private List<PersonRef> cast;
     private Instant createdAt;
     private Instant updatedAt;
+
+    /** A director (characterName null) or an actor. */
+    public record PersonRef(UUID id, String name, String characterName) {
+    }
 }

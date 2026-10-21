@@ -4,6 +4,6 @@ import java.util.UUID;
 
 public class MovieNotFoundException extends DomainException {
     public MovieNotFoundException(UUID movieId) {
-        super("Movie not found with id: " + movieId);
+        super("Không tìm thấy phim có id: " + movieId);
     }
 }

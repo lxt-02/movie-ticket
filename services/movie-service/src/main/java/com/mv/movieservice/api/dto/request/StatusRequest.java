@@ -12,6 +12,6 @@ import lombok.Setter;
 @NoArgsConstructor
 @AllArgsConstructor
 public class StatusRequest {
-    @NotNull(message = "status is required")
+    @NotNull(message = "Trạng thái là bắt buộc")
     private MovieStatus status;
 }

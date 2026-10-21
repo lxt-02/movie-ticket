@@ -11,3 +11,14 @@ spring:
     show-sql: true
   flyway:
     enabled: false
+  kafka:
+    bootstrap-servers: localhost:9092
+    admin:
+      # No broker in tests: do not try to create movie-events.
+      auto-create: false
+
+movie:
+  scheduling:
+    enabled: false
+  search:
+    sync-on-startup: false
