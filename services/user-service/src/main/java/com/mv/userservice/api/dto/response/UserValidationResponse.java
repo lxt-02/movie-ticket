@@ -1,15 +1,14 @@
 package com.mv.userservice.api.dto.response;
 
-import com.mv.userservice.domain.model.user.enums.UserRole;
-import com.mv.userservice.domain.model.user.enums.UserStatus;
+import java.util.UUID;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.util.UUID;
-
+/** Result of validateUser. role: CUSTOMER / STAFF / ADMIN, status: ACTIVE / BLOCKED. */
 @Getter
 @Setter
 @Builder
@@ -19,7 +18,7 @@ public class UserValidationResponse {
     private UUID userId;
     private String email;
     private String fullName;
-    private UserRole role;
-    private UserStatus status;
+    private String role;
+    private String status;
     private boolean valid;
 }
