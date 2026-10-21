@@ -51,10 +51,9 @@ public class MovieController {
             @RequestParam(required = false) MovieStatus status,
             @RequestParam(required = false, name = "q") String keyword,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestHeader(value = AdminAccess.ROLE_HEADER, required = false) String role
+            @RequestParam(defaultValue = "20") int size
     ) {
-        boolean admin = AdminAccess.isAdmin(role);
+        boolean admin = AdminAccess.isAdmin();
         // Non-admins never see archived movies, even when asking for them.
         MovieStatus effectiveStatus = !admin && status == MovieStatus.ARCHIVED ? null : status;
         var result = getMovieUseCase.search(SearchMoviesQuery.builder()
@@ -69,11 +68,10 @@ public class MovieController {
 
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<MovieResponse>> getById(
-            @PathVariable UUID id,
-            @RequestHeader(value = AdminAccess.ROLE_HEADER, required = false) String role
+            @PathVariable UUID id
     ) {
         Movie movie = getMovieUseCase.getById(new GetMovieQuery(id));
-        if (movie.isArchived() && !AdminAccess.isAdmin(role)) {
+        if (movie.isArchived() && !AdminAccess.isAdmin()) {
             throw new MovieNotFoundException(id);
         }
         return ResponseEntity.ok(ApiResponse.success(movieDtoMapper.toResponse(movie)));
@@ -81,10 +79,9 @@ public class MovieController {
 
     @PostMapping
     public ResponseEntity<ApiResponse<MovieResponse>> create(
-            @RequestHeader(value = AdminAccess.ROLE_HEADER, required = false) String role,
             @Valid @RequestBody MovieRequest request
     ) {
-        AdminAccess.require(role);
+        AdminAccess.require();
         Movie movie = manageMovieUseCase.create(toCommand(request));
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Movie created", movieDtoMapper.toResponse(movie)));
@@ -93,10 +90,9 @@ public class MovieController {
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<MovieResponse>> update(
             @PathVariable UUID id,
-            @RequestHeader(value = AdminAccess.ROLE_HEADER, required = false) String role,
             @Valid @RequestBody MovieRequest request
     ) {
-        AdminAccess.require(role);
+        AdminAccess.require();
         Movie movie = manageMovieUseCase.update(id, toCommand(request));
         return ResponseEntity.ok(ApiResponse.success("Movie updated", movieDtoMapper.toResponse(movie)));
     }
@@ -104,10 +100,9 @@ public class MovieController {
     @PatchMapping("/{id}/status")
     public ResponseEntity<ApiResponse<MovieResponse>> changeStatus(
             @PathVariable UUID id,
-            @RequestHeader(value = AdminAccess.ROLE_HEADER, required = false) String role,
             @Valid @RequestBody StatusRequest request
     ) {
-        AdminAccess.require(role);
+        AdminAccess.require();
         Movie movie = manageMovieUseCase.changeStatus(id, request.getStatus());
         return ResponseEntity.ok(ApiResponse.success("Movie status changed", movieDtoMapper.toResponse(movie)));
     }
@@ -115,10 +110,9 @@ public class MovieController {
     /** Soft delete: the movie is ARCHIVED, existing showtimes / bookings are untouched. */
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<MovieResponse>> archive(
-            @PathVariable UUID id,
-            @RequestHeader(value = AdminAccess.ROLE_HEADER, required = false) String role
+            @PathVariable UUID id
     ) {
-        AdminAccess.require(role);
+        AdminAccess.require();
         Movie movie = manageMovieUseCase.archive(id);
         return ResponseEntity.ok(ApiResponse.success("Movie archived", movieDtoMapper.toResponse(movie)));
     }
@@ -135,6 +129,10 @@ public class MovieController {
                 .country(r.getCountry())
                 .posterUrl(r.getPosterUrl())
                 .status(r.getStatus())
+                .genreIds(r.getGenreIds())
+                .crew(r.getCrew() == null ? null : r.getCrew().stream()
+                        .map(c -> new SaveMovieCommand.CrewInput(c.getPersonId(), c.getRole(), c.getCharacterName()))
+                        .toList())
                 .build();
     }
 }

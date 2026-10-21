@@ -44,7 +44,7 @@ public class GlobalExceptionHandler {
         List<String> details = ex.getBindingResult().getFieldErrors().stream()
                 .map(e -> e.getField() + ": " + e.getDefaultMessage())
                 .toList();
-        return error(HttpStatus.BAD_REQUEST, "Validation failed", request, details);
+        return error(HttpStatus.BAD_REQUEST, "Dữ liệu gửi lên không hợp lệ", request, details);
     }
 
     /** Malformed JSON, unknown enum value (e.g. status=FOO), wrong type in a query parameter. */
@@ -89,7 +89,7 @@ public class GlobalExceptionHandler {
                         .timestamp(Instant.now())
                         .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
                         .error(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase())
-                        .message("Internal server error")
+                        .message("Hệ thống đang gặp sự cố, vui lòng thử lại sau")
                         .path(request.getRequestURI())
                         .build()
         );
