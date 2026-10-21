@@ -36,7 +36,6 @@ public class PaymentSettlement {
     private final SavePaymentPort savePaymentPort;
     private final SavePaymentTransactionPort savePaymentTransactionPort;
     private final PaymentEventOutboxPort outboxPort;
-    private final RefundRequests refundRequests;
 
     /** Stores a gateway callback once. @return false if it was already stored. */
     public boolean recordTransaction(Payment payment, String reference, String paymentLinkId, boolean success,
@@ -64,8 +63,10 @@ public class PaymentSettlement {
             }
             case LATE_PAID -> {
                 savePaymentPort.save(payment);
-                // Money arrived for a closed link (booking cancelled / expired / replaced): it must go back.
-                refundRequests.open(payment, "Money received after the payment was " + payment.getStatus());
+                // Money arrived for a closed link (booking cancelled / expired / replaced). No refund flow in this
+                // system: the status stays as it is and the case is only logged for manual handling.
+                log.warn("LATE PAID: payment {} (booking {}) received money while {}; handle manually",
+                        payment.getId(), payment.getBookingId(), payment.getStatus());
             }
             case ALREADY_SUCCESS -> log.debug("Payment {} already SUCCESS", payment.getId());
         }

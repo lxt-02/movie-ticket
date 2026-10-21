@@ -5,7 +5,6 @@ import com.mv.paymentservice.application.event.PaymentEventFactory;
 import com.mv.paymentservice.application.port.in.CancelBookingPaymentsUseCase;
 import com.mv.paymentservice.application.port.in.CreatePaymentUseCase;
 import com.mv.paymentservice.application.port.in.RecordPaymentCreationFailureUseCase;
-import com.mv.paymentservice.application.port.in.RequestRefundUseCase;
 import com.mv.paymentservice.domain.model.payment.exception.DomainException;
 import com.mv.paymentservice.infrastructure.config.JsonCodec;
 import lombok.RequiredArgsConstructor;
@@ -30,7 +29,6 @@ public class PaymentCommandListener {
     private final CreatePaymentUseCase createPaymentUseCase;
     private final RecordPaymentCreationFailureUseCase recordFailureUseCase;
     private final CancelBookingPaymentsUseCase cancelBookingPaymentsUseCase;
-    private final RequestRefundUseCase requestRefundUseCase;
 
     @KafkaListener(
             topics = "${payment.kafka.payment-commands:payment-commands}",
@@ -50,10 +48,6 @@ public class PaymentCommandListener {
 
         if (PaymentCommandMessage.CANCEL_PAYMENT.equals(message.commandType())) {
             onCancelPayment(message);
-            return;
-        }
-        if (PaymentCommandMessage.REFUND_PAYMENT.equals(message.commandType())) {
-            onRefundPayment(message);
             return;
         }
         if (!PaymentCommandMessage.CREATE_PAYMENT.equals(message.commandType())) {
@@ -86,16 +80,6 @@ public class PaymentCommandListener {
         }
         int cancelled = cancelBookingPaymentsUseCase.cancelOpenPayments(bookingId, p == null ? null : p.reason());
         log.info("CANCEL_PAYMENT for booking {}: {} payment(s) cancelled", bookingId, cancelled);
-    }
-
-    /** Database errors propagate so Kafka redelivers; the use case is idempotent per payment. */
-    private void onRefundPayment(PaymentCommandMessage message) {
-        PaymentCommandMessage.Payload p = message.payload();
-        UUID bookingId = p != null && p.bookingId() != null ? p.bookingId() : message.aggregateId();
-        UUID paymentId = p == null ? null : p.paymentId();
-        boolean opened = requestRefundUseCase.requestRefund(bookingId, paymentId, p == null ? null : p.reason());
-        log.info("REFUND_PAYMENT for booking {} payment {}: {}", bookingId, paymentId,
-                opened ? "refund opened" : "nothing new");
     }
 
     private CreatePaymentCommand toCommand(PaymentCommandMessage message) {

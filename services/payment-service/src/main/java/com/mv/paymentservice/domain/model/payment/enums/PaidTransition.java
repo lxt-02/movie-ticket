@@ -8,6 +8,6 @@ public enum PaidTransition {
     MARKED_SUCCESS,
     /** Already SUCCESS (duplicate webhook). Nothing to do. */
     ALREADY_SUCCESS,
-    /** Money arrived after the payment became EXPIRED/FAILED/CANCELLED. Status kept, no event; PaymentSettlement opens a PENDING refund row. */
+    /** Money arrived after the payment became EXPIRED/FAILED/CANCELLED. Status kept, no event, only logged. */
     LATE_PAID
 }

@@ -38,8 +38,6 @@ class PaymentSettlementTest {
     private static final Instant NOW = Instant.parse("2026-10-18T13:10:00Z");
 
     @Mock
-    private RefundRequests refundRequests;
-    @Mock
     private PaymentGatewayPort paymentGatewayPort;
     @Mock
     private SavePaymentPort savePaymentPort;
@@ -53,7 +51,7 @@ class PaymentSettlementTest {
 
     @BeforeEach
     void setUp() {
-        settlement = new PaymentSettlement(paymentGatewayPort, savePaymentPort, savePaymentTransactionPort, outboxPort, refundRequests);
+        settlement = new PaymentSettlement(paymentGatewayPort, savePaymentPort, savePaymentTransactionPort, outboxPort);
         payment = Payment.createPending(UUID.randomUUID(), UUID.randomUUID(), new BigDecimal("150000"), "VND",
                 "key", NOW.plusSeconds(300), NOW.minusSeconds(300));
         payment.attachPaymentLink("link-1", "https://pay.payos.vn/web/link-1", "qr", NOW.minusSeconds(300));

@@ -16,7 +16,7 @@ import java.util.UUID;
 
 /**
  * CANCEL_PAYMENT (booking cancelled or expired): close the open PayOS links so the buyer cannot pay any more.
- * A link that turns out to be PAID becomes SUCCESS (booking-service then logs it for a refund).
+ * A link that turns out to be PAID becomes SUCCESS (booking-service then logs it for manual handling).
  */
 @Slf4j
 @Service
