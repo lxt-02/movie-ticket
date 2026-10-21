@@ -10,7 +10,7 @@ import java.time.Duration;
  *                           before the deadline can still arrive
  * @param batchSize          bookings handled per job run
  * @param confirmationTimeout a paid booking whose seats Showtime still has not confirmed this long after payment
- *                            (Showtime down) stops being retried and moves to REFUND_PENDING
+ *                            (Showtime down) stops being retried and is CANCELLED
  * @param holdSafetyMargin   the payment deadline (booking expires_at = PayOS link expiredAt) is set this much
  *                           before the Showtime seat hold ends. A payment made just before the deadline, whose
  *                           webhook arrives late, still finds the seats held. Must exceed {@code expiryGrace}, so

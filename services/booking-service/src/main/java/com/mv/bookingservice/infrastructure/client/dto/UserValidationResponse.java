@@ -1,14 +1,17 @@
 package com.mv.bookingservice.infrastructure.client.dto;
 
+import java.util.UUID;
+
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.util.UUID;
-
+/** Result of validateUser. role: CUSTOMER / STAFF / ADMIN, status: ACTIVE / BLOCKED. */
 @Getter
 @Setter
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class UserValidationResponse {

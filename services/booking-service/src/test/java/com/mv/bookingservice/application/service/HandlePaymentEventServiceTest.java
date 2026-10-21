@@ -4,7 +4,6 @@ import com.mv.bookingservice.application.command.PaymentEventCommand;
 import com.mv.bookingservice.application.exception.SeatHoldRejectedException;
 import com.mv.bookingservice.application.port.out.InboxPort;
 import com.mv.bookingservice.application.port.out.LoadBookingPort;
-import com.mv.bookingservice.application.port.out.PaymentCommandPort;
 import com.mv.bookingservice.application.port.out.SaveBookingPort;
 import com.mv.bookingservice.application.port.out.ShowtimeClientPort;
 import com.mv.bookingservice.domain.model.booking.aggregate.Booking;
@@ -21,6 +20,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -37,9 +37,6 @@ class HandlePaymentEventServiceTest {
     private SaveBookingPort saveBookingPort;
     @Mock
     private ShowtimeClientPort showtimeClientPort;
-    @Mock
-    private PaymentCommandPort paymentCommandPort;
-
     private HandlePaymentEventService service;
     private Booking booking;
     private UUID paymentId;
@@ -47,7 +44,7 @@ class HandlePaymentEventServiceTest {
     @BeforeEach
     void setUp() {
         service = new HandlePaymentEventService(inboxPort, loadBookingPort, saveBookingPort, showtimeClientPort,
-                new SeatConfirmation(showtimeClientPort, paymentCommandPort), paymentCommandPort);
+                new SeatConfirmation(showtimeClientPort));
         booking = Booking.builder()
                 .id(UUID.randomUUID())
                 .userId(UUID.randomUUID())
@@ -102,7 +99,7 @@ class HandlePaymentEventServiceTest {
     }
 
     @Test
-    void seatsRejectedByShowtimeMoveBookingToRefund() {
+    void seatsRejectedByShowtimeCancelBooking() {
         PaymentEventCommand event = event(PaymentEventCommand.PAYMENT_SUCCEEDED, new BigDecimal("150000"));
         when(inboxPort.isProcessed(event.getEventId())).thenReturn(false);
         when(loadBookingPort.findById(booking.getId())).thenReturn(Optional.of(booking));
@@ -111,16 +108,14 @@ class HandlePaymentEventServiceTest {
 
         service.handle(event);
 
-        assertEquals(BookingStatus.REFUND_PENDING, booking.getStatus());
+        assertEquals(BookingStatus.CANCELLED, booking.getStatus());
         assertEquals(paymentId, booking.getPaidPaymentId());
         verify(saveBookingPort).save(booking);
-        verify(paymentCommandPort).requestRefund(org.mockito.ArgumentMatchers.eq(booking),
-                org.mockito.ArgumentMatchers.eq(paymentId), any());
         verify(inboxPort).markProcessed(event.getEventId(), PaymentEventCommand.PAYMENT_SUCCEEDED);
     }
 
     @Test
-    void paymentForCancelledBookingIsSentForRefund() {
+    void paymentForCancelledBookingIsFlaggedForRefund() {
         booking.setStatus(BookingStatus.CANCELLED);
         PaymentEventCommand event = event(PaymentEventCommand.PAYMENT_SUCCEEDED, new BigDecimal("150000"));
         when(inboxPort.isProcessed(event.getEventId())).thenReturn(false);
@@ -129,8 +124,8 @@ class HandlePaymentEventServiceTest {
         service.handle(event);
 
         assertEquals(BookingStatus.CANCELLED, booking.getStatus());
-        verify(paymentCommandPort).requestRefund(org.mockito.ArgumentMatchers.eq(booking),
-                org.mockito.ArgumentMatchers.eq(paymentId), any());
+        assertTrue(booking.isNeedsRefund());
+        verify(saveBookingPort).save(booking);
         verify(showtimeClientPort, never()).confirmHold(any());
     }
 
@@ -158,7 +153,8 @@ class HandlePaymentEventServiceTest {
         service.handle(event);
 
         verify(showtimeClientPort, never()).confirmHold(any());
-        assertEquals(BookingStatus.REFUND_PENDING, booking.getStatus());
+        assertEquals(BookingStatus.EXPIRED, booking.getStatus());
+        assertTrue(booking.isNeedsRefund());
     }
 
     @Test
@@ -196,6 +192,7 @@ class HandlePaymentEventServiceTest {
 
         verify(showtimeClientPort, never()).confirmHold(any());
         assertEquals(BookingStatus.PENDING, booking.getStatus());
+        assertTrue(booking.isNeedsRefund());
         verify(inboxPort).markProcessed(event.getEventId(), PaymentEventCommand.PAYMENT_SUCCEEDED);
     }
 

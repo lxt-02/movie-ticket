@@ -9,6 +9,7 @@ import lombok.Setter;
 import java.util.List;
 import java.util.UUID;
 
+/** Body of holdSeats. */
 @Getter
 @Setter
 @Builder

@@ -11,14 +11,25 @@ import org.springframework.stereotype.Component;
 
 /**
  * Consumes payment-events from payment-service.
+ * <ul>
+ *     <li>{@link #onMessage}: the main topic. Technical errors are retried with backoff, then the record goes to
+ *     {@code payment-events.DLT} (see KafkaConfig).</li>
+ *     <li>{@link #onDeadLetter}: replays the DLT. Not started on boot: started on demand once the cause is fixed
+ *     (POST /api/v1/bookings/admin/payment-events-dlt/replay). Safe to replay: the inbox skips events already
+ *     applied.</li>
+ * </ul>
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class PaymentEventListener {
 
+    /** Listener container id of the DLT replay (see PaymentEventsOpsController). */
+    public static final String DLT_REPLAY_LISTENER_ID = "payment-events-dlt-replay";
+
     private final JsonCodec json;
     private final HandlePaymentEventUseCase handlePaymentEventUseCase;
+    private final PaymentEventChaos chaos;
 
     @KafkaListener(
             topics = "${booking.kafka.payment-events:payment-events}",
@@ -27,6 +38,23 @@ public class PaymentEventListener {
     public void onMessage(ConsumerRecord<String, String> record) {
         log.info("Kafka RECV topic={} partition={} offset={} key={} body={}",
                 record.topic(), record.partition(), record.offset(), record.key(), record.value());
+        chaos.maybeFail();
+        process(record);
+    }
+
+    @KafkaListener(
+            id = DLT_REPLAY_LISTENER_ID,
+            topics = "${booking.kafka.payment-events:payment-events}.DLT",
+            groupId = "booking-service-dlt-replay",
+            autoStartup = "false"
+    )
+    public void onDeadLetter(ConsumerRecord<String, String> record) {
+        log.warn("DLT REPLAY topic={} partition={} offset={} key={} body={}",
+                record.topic(), record.partition(), record.offset(), record.key(), record.value());
+        process(record);
+    }
+
+    private void process(ConsumerRecord<String, String> record) {
         PaymentEventMessage message;
         try {
             message = json.read(record.value(), PaymentEventMessage.class);
@@ -35,7 +63,6 @@ public class PaymentEventListener {
                     record.topic(), record.partition(), record.offset(), e.getMessage());
             return;
         }
-
         PaymentEventMessage.Payload p = message.payload();
         String reason = p == null ? null
                 : p.reason() != null ? p.reason() + (p.message() != null ? ": " + p.message() : "")
