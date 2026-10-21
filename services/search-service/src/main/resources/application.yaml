@@ -1,0 +1,70 @@
+server:
+  port: 8087
+
+spring:
+  config:
+    import:
+      # Load variables from this module's .env (run from module dir or from project root)
+      - optional:file:.env[.properties]
+      - optional:file:services/search-service/.env[.properties]
+  application:
+    name: search-service
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: search-service
+      # A new consumer group reads the topic from the beginning: a fresh search-service indexes every movie.
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      # Only used to publish failed events to movie-events.DLT
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+search:
+  elasticsearch:
+    url: ${ELASTICSEARCH_URL:http://localhost:9200}
+    username: ${ELASTICSEARCH_USERNAME:}
+    password: ${ELASTICSEARCH_PASSWORD:}
+    movie-index: ${ELASTICSEARCH_MOVIE_INDEX:movies}
+    connect-timeout-ms: 3000
+    read-timeout-ms: 10000
+  kafka:
+    movie-events: ${MOVIE_EVENTS_TOPIC:movie-events}
+    # Elasticsearch down: retry 1s, 2s, 4s ... (max 30s between attempts) for 5 minutes, then movie-events.DLT
+    retry-max-interval-ms: 30000
+    retry-max-elapsed-ms: 300000
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE:http://localhost:8761/eureka/}
+  instance:
+    prefer-ip-address: true
+    # IP in the ID: several instances on the same port (docker compose --scale) stay distinct in Eureka.
+    instance-id: ${EUREKA_INSTANCE_ID:${spring.application.name}:${spring.cloud.client.ip-address}:${server.port}}
+
+logging:
+  pattern:
+    correlation: '[cid=%X{correlationId:-} trace=%X{traceId:-}] '
+  level:
+    com.mv.searchservice: DEBUG
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+    export:
+      zipkin:
+        endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+  metrics:
+    tags:
+      application: ${spring.application.name}

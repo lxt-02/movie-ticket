@@ -1,0 +1,80 @@
+{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
+    "analysis": {
+      "filter": {
+        "vi_folding": {
+          "type": "asciifolding",
+          "preserve_original": true
+        },
+        "autocomplete_edge": {
+          "type": "edge_ngram",
+          "min_gram": 1,
+          "max_gram": 20
+        }
+      },
+      "analyzer": {
+        "vi_text": {
+          "type": "custom",
+          "tokenizer": "standard",
+          "filter": ["lowercase", "vi_folding"]
+        },
+        "autocomplete_index": {
+          "type": "custom",
+          "tokenizer": "standard",
+          "filter": ["lowercase", "asciifolding", "autocomplete_edge"]
+        },
+        "autocomplete_search": {
+          "type": "custom",
+          "tokenizer": "standard",
+          "filter": ["lowercase", "asciifolding"]
+        }
+      }
+    }
+  },
+  "mappings": {
+    "dynamic": "strict",
+    "properties": {
+      "id": { "type": "keyword" },
+      "title": {
+        "type": "text",
+        "analyzer": "vi_text",
+        "fields": {
+          "keyword": { "type": "keyword" },
+          "suggest": { "type": "text", "analyzer": "autocomplete_index", "search_analyzer": "autocomplete_search" }
+        }
+      },
+      "originalTitle": {
+        "type": "text",
+        "analyzer": "vi_text",
+        "fields": {
+          "suggest": { "type": "text", "analyzer": "autocomplete_index", "search_analyzer": "autocomplete_search" }
+        }
+      },
+      "description": { "type": "text", "analyzer": "vi_text" },
+      "genres": { "type": "keyword" },
+      "genreIds": { "type": "keyword" },
+      "directors": {
+        "type": "text",
+        "analyzer": "vi_text",
+        "fields": { "keyword": { "type": "keyword" } }
+      },
+      "actors": {
+        "type": "text",
+        "analyzer": "vi_text",
+        "fields": { "keyword": { "type": "keyword" } }
+      },
+      "characters": { "type": "text", "analyzer": "vi_text" },
+      "ageRating": { "type": "keyword" },
+      "language": { "type": "keyword" },
+      "country": { "type": "keyword" },
+      "status": { "type": "keyword" },
+      "releaseDate": { "type": "date", "format": "yyyy-MM-dd" },
+      "durationMinutes": { "type": "integer" },
+      "posterUrl": { "type": "keyword", "index": false },
+      "createdAt": { "type": "date" },
+      "updatedAt": { "type": "date" }
+    }
+  }
+}
