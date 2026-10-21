@@ -23,14 +23,14 @@ public record CinemaDetails(
         district = optional(district, "district", 100);
         phone = optional(phone, "phone", 30);
         if (phone != null && !PHONE.matcher(phone).matches()) {
-            throw new InvalidCinemaException("phone has an invalid format");
+            throw new InvalidCinemaException("Số điện thoại không đúng định dạng");
         }
     }
 
     private static String required(String value, String field, int max) {
         String v = optional(value, field, max);
         if (v == null) {
-            throw new InvalidCinemaException(field + " must not be blank");
+            throw new InvalidCinemaException(field + " không được để trống");
         }
         return v;
     }
@@ -41,7 +41,7 @@ public record CinemaDetails(
         }
         String v = value.trim();
         if (v.length() > max) {
-            throw new InvalidCinemaException(field + " must be at most " + max + " characters");
+            throw new InvalidCinemaException(field + " tối đa " + max + " ký tự");
         }
         return v;
     }

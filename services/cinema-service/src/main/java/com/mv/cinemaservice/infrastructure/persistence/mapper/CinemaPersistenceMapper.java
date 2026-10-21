@@ -94,6 +94,23 @@ public class CinemaPersistenceMapper {
                 .build();
     }
 
+    public SeatEntity toEntity(Seat domain, ScreenEntity screen, SeatTypeEntity seatType) {
+        return SeatEntity.builder()
+                .id(domain.getId())
+                .screen(screen)
+                .seatType(seatType)
+                .rowLabel(domain.getRowLabel())
+                .seatNumber(domain.getSeatNumber())
+                .label(domain.getLabel())
+                .status(domain.getStatus())
+                .build();
+    }
+
+    public com.mv.cinemaservice.domain.model.screen.entity.ScreenType toDomain(ScreenTypeEntity entity) {
+        return new com.mv.cinemaservice.domain.model.screen.entity.ScreenType(
+                entity.getId(), entity.getName(), entity.getDescription());
+    }
+
     public SeatType toDomain(SeatTypeEntity entity) {
         if (entity == null) {
             return null;

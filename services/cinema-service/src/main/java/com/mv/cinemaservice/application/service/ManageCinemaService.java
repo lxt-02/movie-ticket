@@ -57,7 +57,7 @@ public class ManageCinemaService implements ManageCinemaUseCase {
 
     private static CinemaDetails toDetails(SaveCinemaCommand c) {
         if (c == null) {
-            throw new InvalidCinemaException("cinema data must not be null");
+            throw new InvalidCinemaException("Thiếu dữ liệu rạp");
         }
         return new CinemaDetails(c.getName(), c.getBrand(), c.getAddress(), c.getCity(), c.getDistrict(), c.getPhone());
     }
