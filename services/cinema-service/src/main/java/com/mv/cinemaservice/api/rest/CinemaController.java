@@ -54,10 +54,9 @@ public class CinemaController {
             @RequestParam(required = false) CinemaStatus status,
             @RequestParam(required = false, name = "q") String keyword,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestHeader(value = AdminAccess.ROLE_HEADER, required = false) String role
+            @RequestParam(defaultValue = "20") int size
     ) {
-        boolean admin = AdminAccess.isAdmin(role);
+        boolean admin = AdminAccess.isAdmin();
         CinemaStatus effectiveStatus = !admin && status == CinemaStatus.CLOSED ? null : status;
         var result = getCinemaUseCase.search(SearchCinemasQuery.builder()
                 .city(city)
@@ -72,19 +71,17 @@ public class CinemaController {
 
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<CinemaResponse>> getById(
-            @PathVariable UUID id,
-            @RequestHeader(value = AdminAccess.ROLE_HEADER, required = false) String role
+            @PathVariable UUID id
     ) {
-        Cinema cinema = visible(id, role);
+        Cinema cinema = visible(id);
         return ResponseEntity.ok(ApiResponse.success(cinemaDtoMapper.toResponse(cinema)));
     }
 
     @GetMapping("/{id}/screens")
     public ResponseEntity<ApiResponse<List<ScreenResponse>>> getScreens(
-            @PathVariable UUID id,
-            @RequestHeader(value = AdminAccess.ROLE_HEADER, required = false) String role
+            @PathVariable UUID id
     ) {
-        visible(id, role);
+        visible(id);
         List<ScreenResponse> screens = getCinemaUseCase.getScreens(id).stream()
                 .map((com.mv.cinemaservice.domain.model.screen.aggregate.Screen s) -> cinemaDtoMapper.toResponse(s))
                 .toList();
@@ -93,10 +90,9 @@ public class CinemaController {
 
     @PostMapping
     public ResponseEntity<ApiResponse<CinemaResponse>> create(
-            @RequestHeader(value = AdminAccess.ROLE_HEADER, required = false) String role,
             @Valid @RequestBody CinemaRequest request
     ) {
-        AdminAccess.require(role);
+        AdminAccess.require();
         Cinema cinema = manageCinemaUseCase.create(toCommand(request));
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Cinema created", cinemaDtoMapper.toResponse(cinema)));
@@ -105,10 +101,9 @@ public class CinemaController {
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<CinemaResponse>> update(
             @PathVariable UUID id,
-            @RequestHeader(value = AdminAccess.ROLE_HEADER, required = false) String role,
             @Valid @RequestBody CinemaRequest request
     ) {
-        AdminAccess.require(role);
+        AdminAccess.require();
         Cinema cinema = manageCinemaUseCase.update(id, toCommand(request));
         return ResponseEntity.ok(ApiResponse.success("Cinema updated", cinemaDtoMapper.toResponse(cinema)));
     }
@@ -116,10 +111,9 @@ public class CinemaController {
     @PatchMapping("/{id}/status")
     public ResponseEntity<ApiResponse<CinemaResponse>> changeStatus(
             @PathVariable UUID id,
-            @RequestHeader(value = AdminAccess.ROLE_HEADER, required = false) String role,
             @Valid @RequestBody StatusRequest request
     ) {
-        AdminAccess.require(role);
+        AdminAccess.require();
         Cinema cinema = manageCinemaUseCase.changeStatus(id, request.getStatus());
         return ResponseEntity.ok(ApiResponse.success("Cinema status changed", cinemaDtoMapper.toResponse(cinema)));
     }
@@ -127,17 +121,16 @@ public class CinemaController {
     /** Soft delete: the cinema becomes CLOSED, existing showtimes / bookings are untouched. */
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<CinemaResponse>> close(
-            @PathVariable UUID id,
-            @RequestHeader(value = AdminAccess.ROLE_HEADER, required = false) String role
+            @PathVariable UUID id
     ) {
-        AdminAccess.require(role);
+        AdminAccess.require();
         Cinema cinema = manageCinemaUseCase.close(id);
         return ResponseEntity.ok(ApiResponse.success("Cinema closed", cinemaDtoMapper.toResponse(cinema)));
     }
 
-    private Cinema visible(UUID id, String role) {
+    private Cinema visible(UUID id) {
         Cinema cinema = getCinemaUseCase.getById(new GetCinemaQuery(id));
-        if (cinema.isClosed() && !AdminAccess.isAdmin(role)) {
+        if (cinema.isClosed() && !AdminAccess.isAdmin()) {
             throw new CinemaNotFoundException(id);
         }
         return cinema;

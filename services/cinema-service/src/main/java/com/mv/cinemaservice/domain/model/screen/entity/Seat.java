@@ -29,4 +29,12 @@ public class Seat {
     public boolean isUsable() {
         return status == SeatStatus.ACTIVE;
     }
+
+    /** ACTIVE / BROKEN / INACTIVE. Only new showtimes see the change (existing ones copied the layout). */
+    public void changeStatus(SeatStatus target) {
+        if (target == null) {
+            throw new com.mv.cinemaservice.domain.model.screen.exception.InvalidScreenException("Trạng thái là bắt buộc");
+        }
+        this.status = target;
+    }
 }

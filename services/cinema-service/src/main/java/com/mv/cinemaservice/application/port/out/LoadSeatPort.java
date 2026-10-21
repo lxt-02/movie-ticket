@@ -7,4 +7,6 @@ import java.util.UUID;
 
 public interface LoadSeatPort {
     List<Seat> findByScreenId(UUID screenId);
+
+    java.util.Optional<Seat> findById(UUID seatId);
 }

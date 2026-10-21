@@ -1,24 +1,25 @@
 package com.mv.cinemaservice.api.security;
 
+import com.mv.cinemaservice.infrastructure.security.CurrentUser;
+
 /**
- * Admin check for cinema writes. Until JWT is in place the role comes from the X-User-Role header
- * (same trust model as X-User-Id): only "ADMIN" may create, edit or close.
+ * Admin check for writes: the role comes from the {@code SecurityContextHolder} (built from the X-User-Role header
+ * that the gateway takes from the Keycloak token).
  */
 public final class AdminAccess {
 
-    public static final String ROLE_HEADER = "X-User-Role";
     public static final String ADMIN = "ADMIN";
 
     private AdminAccess() {
     }
 
-    public static boolean isAdmin(String role) {
-        return role != null && ADMIN.equalsIgnoreCase(role.trim());
+    public static boolean isAdmin() {
+        return CurrentUser.hasRole(ADMIN);
     }
 
-    public static void require(String role) {
-        if (!isAdmin(role)) {
-            throw new ForbiddenException("Only ADMIN can manage cinemas (header " + ROLE_HEADER + ")");
+    public static void require() {
+        if (!isAdmin()) {
+            throw new ForbiddenException("Chỉ ADMIN mới được quản lý rạp");
         }
     }
 }

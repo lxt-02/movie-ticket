@@ -40,7 +40,7 @@ public class Cinema {
     public static Cinema create(CinemaDetails details, CinemaStatus initialStatus, Instant now) {
         CinemaStatus status = initialStatus == null ? CinemaStatus.ACTIVE : initialStatus;
         if (status == CinemaStatus.CLOSED) {
-            throw new InvalidCinemaException("A new cinema cannot be CLOSED");
+            throw new InvalidCinemaException("Rạp mới không được ở trạng thái CLOSED");
         }
         Cinema cinema = Cinema.builder()
                 .id(UUID.randomUUID())
@@ -54,7 +54,7 @@ public class Cinema {
     /** A closed cinema is read-only. */
     public void update(CinemaDetails details) {
         if (isClosed()) {
-            throw new InvalidCinemaException("A closed cinema cannot be edited");
+            throw new InvalidCinemaException("Rạp đã đóng cửa không được sửa");
         }
         apply(details);
     }
@@ -65,13 +65,13 @@ public class Cinema {
      */
     public void changeStatus(CinemaStatus target) {
         if (target == null) {
-            throw new InvalidCinemaException("status must not be null");
+            throw new InvalidCinemaException("Trạng thái là bắt buộc");
         }
         if (target == status) {
             return;
         }
         if (isClosed()) {
-            throw new InvalidCinemaException("A closed cinema cannot be reopened");
+            throw new InvalidCinemaException("Rạp đã đóng cửa không thể mở lại");
         }
         this.status = target;
     }
@@ -83,7 +83,7 @@ public class Cinema {
 
     private void apply(CinemaDetails details) {
         if (details == null) {
-            throw new InvalidCinemaException("cinema details must not be null");
+            throw new InvalidCinemaException("Thiếu thông tin rạp");
         }
         this.name = details.name();
         this.brand = details.brand();
