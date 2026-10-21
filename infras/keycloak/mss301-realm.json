@@ -1,0 +1,158 @@
+{
+  "realm": "mss301",
+  "enabled": true,
+  "displayName": "MSS301 Movie Booking",
+  "sslRequired": "none",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "rememberMe": true,
+  "verifyEmail": false,
+  "accessTokenLifespan": 1800,
+  "ssoSessionIdleTimeout": 7200,
+  "roles": {
+    "realm": [
+      {
+        "name": "CUSTOMER",
+        "description": "Khách mua vé"
+      },
+      {
+        "name": "STAFF",
+        "description": "Nhân viên rạp"
+      },
+      {
+        "name": "ADMIN",
+        "description": "Quản trị hệ thống"
+      },
+      {
+        "name": "offline_access"
+      },
+      {
+        "name": "uma_authorization"
+      },
+      {
+        "name": "default-roles-mss301",
+        "composite": true,
+        "composites": {
+          "realm": [
+            "offline_access",
+            "uma_authorization",
+            "CUSTOMER"
+          ]
+        }
+      }
+    ]
+  },
+  "defaultRole": {
+    "name": "default-roles-mss301"
+  },
+  "clients": [
+    {
+      "clientId": "mss301-frontend",
+      "name": "MSS301 Frontend",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "rootUrl": "http://localhost:3000",
+      "baseUrl": "/",
+      "redirectUris": [
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000/*"
+      }
+    }
+  ],
+  "users": [
+    {
+      "id": "10000000-0000-0000-0000-000000000001",
+      "username": "customer",
+      "email": "customer.demo@example.com",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Demo",
+      "lastName": "Customer",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "123456",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "default-roles-mss301",
+        "CUSTOMER"
+      ]
+    },
+    {
+      "id": "10000000-0000-0000-0000-000000000002",
+      "username": "staff",
+      "email": "staff.demo@example.com",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Demo",
+      "lastName": "Staff",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "123456",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "default-roles-mss301",
+        "STAFF"
+      ]
+    },
+    {
+      "id": "10000000-0000-0000-0000-000000000003",
+      "username": "blocked",
+      "email": "blocked.demo@example.com",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Blocked",
+      "lastName": "Customer",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "123456",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "default-roles-mss301",
+        "CUSTOMER"
+      ]
+    },
+    {
+      "id": "10000000-0000-0000-0000-000000000004",
+      "username": "admin",
+      "email": "admin.demo@example.com",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Demo",
+      "lastName": "Admin",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "123456",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "default-roles-mss301",
+        "ADMIN"
+      ]
+    }
+  ]
+}
