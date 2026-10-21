@@ -30,6 +30,11 @@ spring:
     locations: classpath:db/migration
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    # Trace context in Kafka headers: the consumer span joins the producer's trace.
+    template:
+      observation-enabled: true
+    listener:
+      observation-enabled: true
     producer:
       acks: all
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
@@ -80,6 +85,9 @@ payment:
     stale-publishing-timeout-ms: 120000
 
 logging:
+  pattern:
+    # Correlation ID of the request (X-Correlation-Id) in every log line
+    correlation: '[cid=%X{correlationId:-} trace=%X{traceId:-}] '
   level:
     com.mv.paymentservice: DEBUG
     org.springframework.web: INFO
@@ -90,4 +98,29 @@ eureka:
       defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE}
   instance:
     prefer-ip-address: true
-    instance-id: ${spring.application.name}:${server.port}
+    # IP in the ID: several instances on the same port (docker compose --scale) stay distinct in Eureka.
+    instance-id: ${EUREKA_INSTANCE_ID:${spring.application.name}:${spring.cloud.client.ip-address}:${server.port}}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  tracing:
+    sampling:
+      # Every request is traced (demo). Lower it in production (e.g. 0.1).
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+    export:
+      zipkin:
+        endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+  # Same setting under its Spring Boot 3 name (ignored if unknown).
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+  metrics:
+    tags:
+      # Every metric carries the service name (Grafana filter).
+      application: ${spring.application.name}

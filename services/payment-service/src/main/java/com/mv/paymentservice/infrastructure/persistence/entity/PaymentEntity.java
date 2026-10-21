@@ -75,6 +75,9 @@ public class PaymentEntity {
     @Column(name = "failure_reason", length = 1000)
     private String failureReason;
 
+    @Column(name = "needs_refund", nullable = false)
+    private boolean needsRefund;
+
     @Column(name = "paid_at")
     private Instant paidAt;
 

@@ -20,7 +20,7 @@ import java.util.UUID;
  * <ul>
  *     <li>VND only, amount is a positive whole number.</li>
  *     <li>SUCCESS is never overwritten.</li>
- *     <li>A success webhook after another terminal status is a "late paid": status kept, refund manually.</li>
+ *     <li>A success webhook after another terminal status is a "late paid": status kept, only logged.</li>
  * </ul>
  */
 @Getter
@@ -51,6 +51,8 @@ public class Payment {
     private String gatewayTransactionId;
     private String idempotencyKey;
     private String failureReason;
+    /** Money arrived on a link already closed (late paid): to be refunded by hand, no refund flow here. */
+    private boolean needsRefund;
     private Instant paidAt;
     private Instant expiredAt;
     private Instant createdAt;
@@ -59,18 +61,18 @@ public class Payment {
     public static Payment createPending(UUID bookingId, UUID userId, BigDecimal amount, String currency,
                                         String idempotencyKey, Instant expiredAt, Instant now) {
         if (bookingId == null) {
-            throw new InvalidPaymentException("bookingId must not be null");
+            throw new InvalidPaymentException("Mã booking là bắt buộc");
         }
         if (userId == null) {
-            throw new InvalidPaymentException("userId must not be null");
+            throw new InvalidPaymentException("Người dùng là bắt buộc");
         }
         validateVndAmount(amount);
         String resolvedCurrency = currency == null || currency.isBlank() ? CURRENCY_VND : currency.trim().toUpperCase();
         if (!CURRENCY_VND.equals(resolvedCurrency)) {
-            throw new InvalidPaymentException("Only VND is supported by PayOS, got: " + currency);
+            throw new InvalidPaymentException("PayOS chỉ hỗ trợ VND, nhận được: " + currency);
         }
         if (expiredAt == null || !expiredAt.isAfter(now)) {
-            throw new InvalidPaymentException("Payment expiration must be in the future");
+            throw new InvalidPaymentException("Thời hạn thanh toán phải ở tương lai");
         }
 
         UUID id = UUID.randomUUID();
@@ -104,10 +106,10 @@ public class Payment {
 
     public static void validateVndAmount(BigDecimal amount) {
         if (amount == null || amount.signum() <= 0) {
-            throw new InvalidPaymentException("Amount must be greater than zero");
+            throw new InvalidPaymentException("Số tiền phải lớn hơn 0");
         }
         if (amount.stripTrailingZeros().scale() > 0) {
-            throw new InvalidPaymentException("VND amount must be a whole number, got: " + amount.toPlainString());
+            throw new InvalidPaymentException("Số tiền VND phải là số nguyên, nhận được: " + amount.toPlainString());
         }
     }
 
@@ -145,6 +147,7 @@ public class Payment {
             }
             this.paidAt = effectivePaidAt;
             this.failureReason = "Late PayOS success webhook after terminal payment status: " + status;
+            this.needsRefund = true;
             this.updatedAt = now;
             return PaidTransition.LATE_PAID;
         }
@@ -190,21 +193,5 @@ public class Payment {
         this.failureReason = reason;
         this.updatedAt = now;
         return true;
-    }
-
-    public void markRefundPending() {
-        if (this.status != PaymentStatus.SUCCESS) {
-            throw new InvalidPaymentException("Only SUCCESS payments can be refunded");
-        }
-        this.status = PaymentStatus.REFUND_PENDING;
-        this.updatedAt = Instant.now();
-    }
-
-    public void markRefunded() {
-        if (this.status != PaymentStatus.REFUND_PENDING && this.status != PaymentStatus.SUCCESS) {
-            throw new InvalidPaymentException("Cannot transition payment " + id + " from " + status + " to REFUNDED");
-        }
-        this.status = PaymentStatus.REFUNDED;
-        this.updatedAt = Instant.now();
     }
 }

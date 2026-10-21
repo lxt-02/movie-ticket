@@ -60,14 +60,12 @@ public final class PaymentEventFactory {
 
     /**
      * Event describing the current state of an existing payment, re-sent when booking repeats a command.
-     * Returns null for states that have no event (e.g. refunds).
      */
     public static PaymentEvent currentState(Payment payment, Instant now) {
         PaymentStatus status = payment.getStatus();
         return switch (status) {
             case PENDING, PROCESSING -> linkCreated(payment, now);
             case SUCCESS, FAILED, EXPIRED, CANCELLED -> statusChanged(payment, now);
-            default -> null;
         };
     }
 

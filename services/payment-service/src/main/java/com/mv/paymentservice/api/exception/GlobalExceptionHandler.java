@@ -28,7 +28,7 @@ public class GlobalExceptionHandler {
         ErrorResponse response = ErrorResponse.builder()
                 .status(status.value())
                 .error(status.getReasonPhrase())
-                .message("Missing required header " + ex.getHeaderName())
+                .message("Thiếu header bắt buộc: " + ex.getHeaderName())
                 .path(request.getRequestURI())
                 .timestamp(Instant.now())
                 .build();
@@ -57,7 +57,7 @@ public class GlobalExceptionHandler {
                         .timestamp(Instant.now())
                         .status(HttpStatus.BAD_REQUEST.value())
                         .error(HttpStatus.BAD_REQUEST.getReasonPhrase())
-                        .message("Invalid webhook: " + ex.getMessage())
+                        .message("Webhook không hợp lệ: " + ex.getMessage())
                         .path(request.getRequestURI())
                         .build()
         );
@@ -88,7 +88,7 @@ public class GlobalExceptionHandler {
                         .timestamp(Instant.now())
                         .status(HttpStatus.BAD_REQUEST.value())
                         .error(HttpStatus.BAD_REQUEST.getReasonPhrase())
-                        .message("Validation failed")
+                        .message("Dữ liệu gửi lên không hợp lệ")
                         .path(request.getRequestURI())
                         .details(details)
                         .build()
@@ -117,7 +117,7 @@ public class GlobalExceptionHandler {
                         .timestamp(Instant.now())
                         .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
                         .error(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase())
-                        .message("Internal server error")
+                        .message("Hệ thống đang gặp sự cố, vui lòng thử lại sau")
                         .path(request.getRequestURI())
                         .build()
         );

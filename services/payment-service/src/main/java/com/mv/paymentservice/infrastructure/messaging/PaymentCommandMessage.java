@@ -13,8 +13,6 @@ import java.util.UUID;
  *   "payload": { bookingId, userId, amount, currency, provider, description, expiredAt, idempotencyKey } }
  * { "commandId", "aggregateId" (bookingId), "commandType": "CANCEL_PAYMENT", "occurredAt",
  *   "payload": { bookingId, reason } }
- * { "commandId", "aggregateId" (bookingId), "commandType": "REFUND_PAYMENT", "occurredAt",
- *   "payload": { bookingId, paymentId, amount, currency, reason } }
  * </pre>
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -27,7 +25,6 @@ public record PaymentCommandMessage(
 ) {
     public static final String CREATE_PAYMENT = "CREATE_PAYMENT";
     public static final String CANCEL_PAYMENT = "CANCEL_PAYMENT";
-    public static final String REFUND_PAYMENT = "REFUND_PAYMENT";
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Payload(
@@ -39,8 +36,7 @@ public record PaymentCommandMessage(
             String description,
             Instant expiredAt,
             String idempotencyKey,
-            String reason,
-            UUID paymentId
+            String reason
     ) {
     }
 }
