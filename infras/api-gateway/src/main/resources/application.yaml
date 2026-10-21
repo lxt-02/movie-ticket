@@ -20,9 +20,9 @@ spring:
                 # Comma-separated list, e.g. http://localhost:3000,https://mss301.example.com
                 allowed-origins: ${GATEWAY_CORS_ALLOWED_ORIGINS:http://localhost:3000}
                 allowed-methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
-                allowed-headers: Content-Type,Authorization,X-User-Id,X-User-Role,Idempotency-Key,X-Api-Key
+                allowed-headers: Content-Type,Authorization,X-User-Id,X-User-Role,Idempotency-Key,X-Api-Key,X-Correlation-Id
                 # Response headers the frontend JavaScript is allowed to read.
-                exposed-headers: Retry-After,X-RateLimit-Remaining,X-RateLimit-Burst-Capacity,X-RateLimit-Replenish-Rate,X-RateLimit-Requested-Tokens,X-Served-By
+                exposed-headers: Retry-After,X-RateLimit-Remaining,X-RateLimit-Burst-Capacity,X-RateLimit-Replenish-Rate,X-RateLimit-Requested-Tokens,X-Served-By,X-Correlation-Id
                 allow-credentials: false
                 max-age: 3600
           default-filters:
@@ -93,6 +93,20 @@ spring:
               uri: lb://showtime-service
               predicates:
                 - Path=/api/v1/showtimes,/api/v1/showtimes/**
+            # Creating a booking holds seats: rate limited per user (token "sub") so a bot cannot hold a whole
+            # showtime. Must stay BEFORE booking-public-service (first matching route wins).
+            - id: booking-create-rate-limited
+              uri: lb://booking-service
+              predicates:
+                - Path=/api/v1/bookings
+                - Method=POST
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    rate-limiter: "#{@userRateLimiter}"
+                    key-resolver: "#{@userKeyResolver}"
+                    deny-empty-key: true
+                    empty-key-status: UNAUTHORIZED
             - id: booking-public-service
               uri: lb://booking-service
               predicates:
@@ -101,15 +115,28 @@ spring:
               uri: lb://payment-service
               predicates:
                 - Path=/api/v1/payments,/api/v1/payments/**
-            # Catalogue: public GET, writes need X-User-Role: ADMIN (checked by each service).
+            # Catalogue: public GET, writes need the ADMIN role (X-User-Role set from the token, checked by each service).
             - id: movie-public-service
               uri: lb://movie-service
               predicates:
                 - Path=/api/v1/movies,/api/v1/movies/**
+            # Movie search (Elasticsearch read model, fed by movie events on Kafka). Public GET.
+            - id: search-public-service
+              uri: lb://search-service
+              predicates:
+                - Path=/api/v1/search/**
             - id: cinema-public-service
               uri: lb://cinema-service
               predicates:
                 - Path=/api/v1/cinemas,/api/v1/cinemas/**
+            - id: screen-public-service
+              uri: lb://cinema-service
+              predicates:
+                - Path=/api/v1/screens/**,/api/v1/screen-types,/api/v1/seat-types
+            - id: user-public-service
+              uri: lb://user-service
+              predicates:
+                - Path=/api/v1/users,/api/v1/users/**
             # DEPRECATED: read-only internal catalogue routes kept so the current frontend keeps working.
             # Replaced by /api/v1/movies, /api/v1/cinemas, /api/v1/showtimes/{id}/seats; remove once FE switched.
             - id: cinema-service-cinemas
@@ -141,6 +168,11 @@ spring:
       timeout: ${REDIS_TIMEOUT}
 
 app:
+  security:
+    # Keycloak realm (docker-compose service "keycloak"). Must match the "iss" claim of the tokens.
+    issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/mss301}
+    jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:}
+    allowed-origins: ${GATEWAY_CORS_ALLOWED_ORIGINS:http://localhost:3000}
   load-balancer:
     # round-robin (default) | random
     strategy: ${LOADBALANCER_STRATEGY}
@@ -150,8 +182,8 @@ app:
     # Number of load balancers / reverse proxies in front of the Gateway.
     # 0 = exposed directly (use TCP remote address). Set to 1 when running behind one LB (e.g. nginx).
     trusted-proxy-hops: ${RATE_LIMIT_TRUSTED_PROXY_HOPS}
-    # DEV/DEMO ONLY: trust X-User-Id as caller identity (no login yet).
-    # Set to false in production; the user ID must come from a validated JWT.
+    # DEV/DEMO ONLY: on /rate-limit/user/ping, trust X-User-Id when no token is sent.
+    # With a Bearer token the bucket is per token "sub". Set to false in production.
     trust-user-id-header: ${RATE_LIMIT_TRUST_USER_ID_HEADER}
     # Token Bucket policies: replenish-rate = tokens/second, burst-capacity = bucket size,
     # requested-tokens = tokens consumed per request.
@@ -186,4 +218,22 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,gateway
+        include: health,info,gateway,prometheus
+  endpoint:
+    health:
+      show-details: always
+  tracing:
+    sampling:
+      # Every request is traced (demo). Lower it in production (e.g. 0.1).
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+    export:
+      zipkin:
+        endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+  # Same setting under its Spring Boot 3 name (ignored if unknown).
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+  metrics:
+    tags:
+      # Every metric carries the service name (Grafana filter).
+      application: ${spring.application.name}

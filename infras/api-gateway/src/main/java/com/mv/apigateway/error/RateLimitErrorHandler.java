@@ -89,7 +89,7 @@ public class RateLimitErrorHandler implements GlobalFilter, Ordered {
                 routeId(exchange), exchange.getRequest().getMethod(), exchange.getRequest().getPath().value());
 
         return writeJson(exchange, response, HttpStatus.TOO_MANY_REQUESTS,
-                "RATE_LIMIT_EXCEEDED", "Too many requests. Please try again later.");
+                "RATE_LIMIT_EXCEEDED", "Bạn gửi quá nhiều yêu cầu, vui lòng thử lại sau ít phút.");
     }
 
     private Mono<Void> writeMissingIdentity(ServerWebExchange exchange, ServerHttpResponse response) {
@@ -97,7 +97,7 @@ public class RateLimitErrorHandler implements GlobalFilter, Ordered {
                 routeId(exchange), exchange.getRequest().getPath().value());
 
         return writeJson(exchange, response, HttpStatus.UNAUTHORIZED,
-                "RATE_LIMIT_IDENTITY_MISSING", "Unable to identify the caller for rate limiting.");
+                "RATE_LIMIT_IDENTITY_MISSING", "Không xác định được người gọi để giới hạn tần suất (thiếu token / X-User-Id / X-Api-Key).");
     }
 
     private Mono<Void> writeJson(ServerWebExchange exchange, ServerHttpResponse response,
