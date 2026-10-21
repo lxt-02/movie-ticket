@@ -39,8 +39,5 @@ public class BookingResponse {
     private UUID paidPaymentId;
     private Long version;
     private Instant updatedAt;
-    /** Money received that this booking cannot use, waiting for a manual refund. */
-    private boolean needsRefund;
-    private String refundNote;
     private List<BookingSeatResponse> seats;
 }

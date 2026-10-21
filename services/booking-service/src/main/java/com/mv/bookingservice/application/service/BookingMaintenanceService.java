@@ -60,7 +60,7 @@ public class BookingMaintenanceService implements BookingMaintenanceUseCase {
                             booking.getId(), e.getMessage());
                     continue;
                 }
-                // The seat hold is over anyway: expire. A payment found later is flagged for refund.
+                // The seat hold is over anyway: expire. A payment found later is logged for manual check.
                 log.warn("payment-service unreachable for booking {} and its seat hold is over: expiring it ({})",
                         booking.getId(), e.getMessage());
                 paid = Optional.empty();
@@ -88,7 +88,7 @@ public class BookingMaintenanceService implements BookingMaintenanceUseCase {
      * The booking is paid but its PAYMENT_SUCCEEDED event was never applied: confirm it instead of expiring it.
      *
      * @return false if the payment cannot be used for this booking (wrong amount, paid after the deadline): the
-     * booking is flagged for refund and expires as usual
+     * case is logged and the booking expires as usual
      */
     private boolean recoverPaidBooking(Booking booking, PaidPayment payment) {
         boolean sameAmount = payment.amount() != null && booking.getTotalAmount() != null
@@ -99,7 +99,6 @@ public class BookingMaintenanceService implements BookingMaintenanceUseCase {
                     + ", paid at " + payment.paidAt() + ") cannot be used: booking total " + booking.getTotalAmount()
                     + " " + booking.getCurrency() + ", deadline " + booking.getExpiresAt();
             log.error("MANUAL CHECK: booking {}: {}", booking.getId(), reason);
-            booking.flagForRefund(reason);
             return false;
         }
         log.warn("SAFETY NET: booking {} is PAID by {} but PAYMENT_SUCCEEDED was never applied; confirming it "

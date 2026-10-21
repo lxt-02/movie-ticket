@@ -52,8 +52,6 @@ public class BookingPersistenceMapper {
                 .version(entity.getVersion())
                 .updatedAt(entity.getUpdatedAt())
                 .paymentAttempt(entity.getPaymentAttempt() != null ? entity.getPaymentAttempt() : 1)
-                .needsRefund(entity.isNeedsRefund())
-                .refundNote(entity.getRefundNote())
                 .seats(seats)
                 .build();
     }
@@ -88,8 +86,6 @@ public class BookingPersistenceMapper {
                 .version(domain.getVersion())
                 .updatedAt(domain.getUpdatedAt())
                 .paymentAttempt(domain.currentPaymentAttempt())
-                .needsRefund(domain.isNeedsRefund())
-                .refundNote(domain.getRefundNote())
                 .seats(new ArrayList<>())
                 .build();
 

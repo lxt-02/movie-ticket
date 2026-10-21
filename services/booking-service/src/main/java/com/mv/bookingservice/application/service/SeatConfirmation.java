@@ -17,7 +17,7 @@ import java.time.Instant;
  * <ul>
  *     <li>Showtime confirms: CONFIRMED.</li>
  *     <li>Showtime refuses for good (409/404, or a non-CONFIRMED hold): the seats are gone, so the paid booking
- *     is CANCELLED right away instead of being retried forever. No refund flow: logged for manual handling.</li>
+ *     is CANCELLED right away instead of being retried forever, and logged for manual handling.</li>
  *     <li>Temporary failure (timeout, 5xx): stays CONFIRMING for the maintenance job, but only until
  *     {@link BookingPaymentPolicy#confirmationTimeout()} after the payment; then CANCELLED too.</li>
  * </ul>
@@ -99,7 +99,6 @@ public class SeatConfirmation {
         }
         log.error("MANUAL CHECK: booking {} paid by {} but CANCELLED, seats not booked. {}",
                 booking.getId(), booking.getPaidPaymentId(), reason);
-        booking.flagForRefund("Paid by " + booking.getPaidPaymentId() + " but seats could not be booked: " + reason);
         return Outcome.FAILED;
     }
 }

@@ -36,7 +36,7 @@ public class SecurityConfig {
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers("/error", "/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()
                         .requestMatchers("/internal/**").permitAll()
-                        // Back office: refund list, DLT replay, demo chaos switch.
+                        // Back office: DLT replay, demo chaos switch.
                         .requestMatchers("/api/v1/bookings/admin/**").hasAnyRole("ADMIN", "STAFF")
                         .anyRequest().authenticated())
                 .exceptionHandling(e -> e
