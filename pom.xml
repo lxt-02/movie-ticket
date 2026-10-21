@@ -12,7 +12,21 @@
     <artifactId>parent</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>MSS301_Project</name>
-    <description>MSS301_Project</description>
+    <description>MSS301_Project: builds every module in order. Run: mvn install</description>
+    <packaging>pom</packaging>
+
+    <!-- Aggregator only: each module keeps its own parent / dependencies. -->
+    <modules>
+        <module>infras/eureka-service</module>
+        <module>infras/api-gateway</module>
+        <module>services/user-service</module>
+        <module>services/movie-service</module>
+        <module>services/cinema-service</module>
+        <module>services/showtime-service</module>
+        <module>services/payment-service</module>
+        <module>services/booking-service</module>
+        <module>services/search-service</module>
+    </modules>
     <url/>
     <licenses>
         <license/>
@@ -29,26 +43,5 @@
     <properties>
         <java.version>17</java.version>
     </properties>
-    <dependencies>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
-
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-            </plugin>
-        </plugins>
-    </build>
 
 </project>

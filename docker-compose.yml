@@ -1,4 +1,39 @@
+# MSS301 - movie ticket booking (microservices)
+#
+#   docker compose up -d                          infra only (Redis, Kafka, Kafka UI, Keycloak, Zipkin, Elasticsearch):
+#                                                 run the services from the IDE as before
+#   docker compose --profile app up -d --build    EVERYTHING: + MySQL, Eureka, Gateway, 6 services,
+#                                                 Prometheus, Grafana (first build: a few minutes)
+#   docker compose --profile app up -d --scale movie-service=2     load-balancing demo
+#   docker compose --profile app down             stop (add -v to also wipe MySQL / Grafana data)
+#   docker compose --profile kibana up -d kibana  optional Kibana to browse the search index (http://localhost:5601)
+#
+# Only the entry points are published on the host: Gateway 8080, Eureka 8761, Keycloak 8180, Kafka UI 8090,
+# Zipkin 9411, Grafana 3001, Prometheus 9090 (+ MySQL 3307 to inspect the data). The services themselves have
+# no published port: from outside they are reachable only through the Gateway (token check, rate limit,
+# /internal/** blocked).
+
+x-app: &app
+  image: mss301-app:latest
+  build:
+    context: .
+    dockerfile: Dockerfile
+  profiles: ["app"]
+  restart: unless-stopped
+
+x-app-env: &app-env
+  EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:8761/eureka/
+  SPRING_DATASOURCE_USERNAME: root
+  SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-12345}
+  SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
+  TRACING_SAMPLING_PROBABILITY: "1.0"
+  JAVA_OPTS: "-Xms64m -Xmx320m -XX:+UseSerialGC"
+
 services:
+  # ======================================================================
+  # Infrastructure (always started)
+  # ======================================================================
   redis:
     image: redis:7.4-alpine
     container_name: redis
@@ -9,7 +44,8 @@ services:
       - redis-data:/data
 
   # Single-node Kafka (KRaft, no ZooKeeper) for booking <-> payment messaging.
-  # Topics payment-commands / payment-events are created by payment-service on startup.
+  # Topics payment-commands / payment-events are created by payment-service on startup,
+  # payment-events.DLT by booking-service.
   # Dev only: data is not persisted; the outboxes re-send anything not yet acknowledged.
   kafka:
     image: apache/kafka:3.9.0
@@ -19,7 +55,7 @@ services:
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      # PLAINTEXT (localhost:9092) for the services on your machine, INTERNAL (kafka:29092) for kafka-ui.
+      # PLAINTEXT (localhost:9092) for the services on your machine, INTERNAL (kafka:29092) for containers.
       KAFKA_LISTENERS: PLAINTEXT://:9092,INTERNAL://:29092,CONTROLLER://:9093
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:29092
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
@@ -43,5 +79,265 @@ services:
     depends_on:
       - kafka
 
+  # Identity provider (login, register, roles). Admin console: http://localhost:8180 (admin / admin).
+  # Realm "mss301" with demo users is imported from infras/keycloak on first start (skipped if it already exists).
+  # Dev mode: embedded H2 database inside the container; "docker compose down" + up re-imports the realm.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.7
+    container_name: keycloak
+    command: ["start-dev", "--import-realm", "--http-port=8180"]
+    ports:
+      - "8180:8180"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    volumes:
+      - ./infras/keycloak:/opt/keycloak/data/import:ro
+
+  # Distributed tracing UI: http://localhost:9411 (services report spans to /api/v2/spans).
+  zipkin:
+    image: openzipkin/zipkin:3.4
+    container_name: zipkin
+    ports:
+      - "9411:9411"
+
+  # Search engine for movie search (search-service). http://localhost:9200
+  # Dev mode: single node, security off (no password), 512 MB heap. Index "movies" is created by search-service
+  # and filled from Kafka topic movie-events (movie-service re-sends every movie on startup).
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    container_name: elasticsearch
+    ports:
+      - "9200:9200"
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # Optional UI for Elasticsearch (Dev Tools: GET movies/_search). Start with: docker compose --profile kibana up -d kibana
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.17.0
+    container_name: kibana
+    profiles: ["kibana"]
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+
+  # ======================================================================
+  # Full stack (profile "app")
+  # ======================================================================
+  mysql:
+    image: mysql:8.4
+    container_name: mysql
+    profiles: ["app"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-12345}
+    ports:
+      - "3307:3306"   # 3307 on the host: does not clash with a local MySQL on 3306
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  eureka:
+    <<: *app
+    container_name: eureka
+    ports:
+      - "8761:8761"
+    environment:
+      APP: eureka-service
+      JAVA_OPTS: "-Xms64m -Xmx256m -XX:+UseSerialGC"
+
+  api-gateway:
+    <<: *app
+    container_name: api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      APP: api-gateway
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:8761/eureka/
+      EUREKA_REGISTRY_FETCH_INTERVAL: "5"
+      ZIPKIN_ENDPOINT: http://zipkin:9411/api/v2/spans
+      TRACING_SAMPLING_PROBABILITY: "1.0"
+      JAVA_OPTS: "-Xms64m -Xmx320m -XX:+UseSerialGC"
+      # Tokens are issued to the browser / Postman by http://localhost:8180, so "iss" is the localhost URL;
+      # the keys are downloaded inside the Docker network.
+      KEYCLOAK_ISSUER_URI: http://localhost:8180/realms/mss301
+      KEYCLOAK_JWK_SET_URI: http://keycloak:8180/realms/mss301/protocol/openid-connect/certs
+      GATEWAY_CORS_ALLOWED_ORIGINS: http://localhost:3000
+      GATEWAY_RETRY_ATTEMPTS: "2"
+      LOADBALANCER_CACHE_TTL: 5s
+      LOADBALANCER_STRATEGY: round-robin
+      LOADBALANCER_SERVED_BY_HEADER: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_TIMEOUT: 2s
+      RATE_LIMIT_TRUSTED_PROXY_HOPS: "0"
+      RATE_LIMIT_TRUST_USER_ID_HEADER: "true"
+      RATE_LIMIT_USER_REPLENISH_RATE: "1"
+      RATE_LIMIT_USER_BURST_CAPACITY: "3"
+      RATE_LIMIT_USER_REQUESTED_TOKENS: "1"
+      RATE_LIMIT_IP_REPLENISH_RATE: "1"
+      RATE_LIMIT_IP_BURST_CAPACITY: "5"
+      RATE_LIMIT_IP_REQUESTED_TOKENS: "1"
+      RATE_LIMIT_API_KEY_REPLENISH_RATE: "2"
+      RATE_LIMIT_API_KEY_BURST_CAPACITY: "5"
+      RATE_LIMIT_API_KEY_REQUESTED_TOKENS: "1"
+    depends_on:
+      - eureka
+      - redis
+      - keycloak
+
+  user-service:
+    <<: *app
+    environment:
+      <<: *app-env
+      APP: user-service
+      SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/user_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka:
+        condition: service_started
+
+  movie-service:
+    <<: *app
+    environment:
+      <<: *app-env
+      APP: movie-service
+      SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/movie_booking_movie?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka:
+        condition: service_started
+      kafka:
+        condition: service_started
+
+  # Movie search: Kafka movie-events -> Elasticsearch, GET /api/v1/search/movies through the gateway.
+  search-service:
+    <<: *app
+    environment:
+      <<: *app-env
+      APP: search-service
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      eureka:
+        condition: service_started
+
+  cinema-service:
+    <<: *app
+    environment:
+      <<: *app-env
+      APP: cinema-service
+      SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/cinema_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka:
+        condition: service_started
+
+  showtime-service:
+    <<: *app
+    environment:
+      <<: *app-env
+      APP: showtime-service
+      SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/showtime_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+      MOVIE_SERVICE_URL: ""     # empty = resolve through Eureka
+      CINEMA_SERVICE_URL: ""
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka:
+        condition: service_started
+
+  booking-service:
+    <<: *app
+    environment:
+      <<: *app-env
+      APP: booking-service
+      SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/booking_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+      SHOWTIME_SERVICE_URL: ""  # empty = resolve through Eureka
+      USER_SERVICE_URL: ""
+      PAYMENT_SERVICE_URL: ""
+      # DEMO stack: allows the chaos switch (simulated outage -> retry -> DLT -> replay). Never in production.
+      BOOKING_DEMO_CHAOS_ENABLED: "true"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka:
+        condition: service_started
+      kafka:
+        condition: service_started
+
+  payment-service:
+    <<: *app
+    # PayOS keys (PAYOS_CLIENT_ID / PAYOS_API_KEY / PAYOS_CHECKSUM_KEY ...) come from the local .env, never from Git.
+    env_file:
+      - path: ./services/payment-service/.env
+        required: false
+    environment:
+      <<: *app-env
+      APP: payment-service
+      SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/movie_booking_payment?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka:
+        condition: service_started
+      kafka:
+        condition: service_started
+
+  # Metrics: scrapes every instance found in Eureka. http://localhost:9090
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: prometheus
+    profiles: ["app"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infras/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - eureka
+
+  # Dashboards: http://localhost:3001 (admin / admin), dashboard "MSS301 - Microservices overview".
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: grafana
+    profiles: ["app"]
+    ports:
+      - "3001:3000"   # 3001: port 3000 is kept for the frontend
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./infras/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infras/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
 volumes:
   redis-data:
+  es-data:
+  mysql-data:
+  grafana-data:
