@@ -36,7 +36,7 @@ public class SyncPaymentService implements SyncPaymentUseCase {
     public Payment syncLatestPaymentOfBooking(UUID bookingId) {
         List<Payment> payments = loadPaymentPort.findByBookingIdForUpdate(bookingId);
         if (payments.isEmpty()) {
-            throw new PaymentNotFoundException("No payment yet for booking " + bookingId);
+            throw new PaymentNotFoundException("Chưa có thanh toán cho booking " + bookingId);
         }
         return reconcileQuietly(payments.get(0));
     }

@@ -41,8 +41,6 @@ class HandlePayosWebhookServiceTest {
     private static final String BODY = "{raw}";
 
     @Mock
-    private RefundRequests refundRequests;
-    @Mock
     private PaymentGatewayPort paymentGatewayPort;
     @Mock
     private LoadPaymentPort loadPaymentPort;
@@ -59,7 +57,7 @@ class HandlePayosWebhookServiceTest {
     @BeforeEach
     void setUp() {
         PaymentSettlement settlement = new PaymentSettlement(paymentGatewayPort, savePaymentPort,
-                savePaymentTransactionPort, outboxPort, refundRequests);
+                savePaymentTransactionPort, outboxPort);
         service = new HandlePayosWebhookService(paymentGatewayPort, loadPaymentPort, settlement,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         payment = Payment.createPending(UUID.randomUUID(), UUID.randomUUID(), new BigDecimal("150000"), "VND",

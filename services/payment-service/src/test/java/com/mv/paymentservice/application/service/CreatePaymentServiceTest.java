@@ -49,8 +49,6 @@ class CreatePaymentServiceTest {
     private static final Instant NOW = Instant.parse("2026-10-18T13:00:00Z");
 
     @Mock
-    private RefundRequests refundRequests;
-    @Mock
     private LoadPaymentPort loadPaymentPort;
     @Mock
     private SavePaymentPort savePaymentPort;
@@ -68,7 +66,7 @@ class CreatePaymentServiceTest {
     @BeforeEach
     void setUp() {
         PaymentSettlement settlement = new PaymentSettlement(paymentGatewayPort, savePaymentPort,
-                savePaymentTransactionPort, outboxPort, refundRequests);
+                savePaymentTransactionPort, outboxPort);
         service = new CreatePaymentService(loadPaymentPort, savePaymentPort, paymentGatewayPort, outboxPort, settlement,
                 new PaymentDefaults(Duration.ofMinutes(15), 100, Duration.ofSeconds(60), 50),
                 Clock.fixed(NOW, ZoneOffset.UTC));
