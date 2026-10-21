@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.web.server.WebExceptionHandler;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -61,6 +62,10 @@ public class GatewayErrorHandler implements WebExceptionHandler {
             log.warn("Gateway error {} on {}: {}", status.value(), exchange.getRequest().getPath().value(), ex.toString());
         }
         response.setStatusCode(status);
+        if (status.value() == 503 || status.value() == 504) {
+            // Same hint as the services' 503: the frontend may retry after this many seconds.
+            response.getHeaders().set(HttpHeaders.RETRY_AFTER, "10");
+        }
         response.getHeaders().setContentType(new MediaType("application", "json", StandardCharsets.UTF_8));
         String reason = status instanceof HttpStatus http ? http.getReasonPhrase() : String.valueOf(status.value());
         String path = exchange.getRequest().getPath().value().replace("\\", "\\\\").replace("\"", "\\\"");
