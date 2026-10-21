@@ -51,8 +51,6 @@ public class Payment {
     private String gatewayTransactionId;
     private String idempotencyKey;
     private String failureReason;
-    /** Money arrived on a link already closed (late paid): to be refunded by hand, no refund flow here. */
-    private boolean needsRefund;
     private Instant paidAt;
     private Instant expiredAt;
     private Instant createdAt;
@@ -147,7 +145,6 @@ public class Payment {
             }
             this.paidAt = effectivePaidAt;
             this.failureReason = "Late PayOS success webhook after terminal payment status: " + status;
-            this.needsRefund = true;
             this.updatedAt = now;
             return PaidTransition.LATE_PAID;
         }
