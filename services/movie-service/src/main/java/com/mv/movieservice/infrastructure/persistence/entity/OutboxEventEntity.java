@@ -36,7 +36,7 @@ public class OutboxEventEntity {
     private String eventType;
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "payload", nullable = false, columnDefinition = "json")
+    @Column(name = "payload", nullable = false)
     private String payload;
 
     @Column(name = "published_at")

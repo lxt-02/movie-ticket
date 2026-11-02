@@ -1,0 +1,1925 @@
+{
+  "info": {
+    "_postman_id": "50b9aece-a8ab-5543-a4f5-3923e9445605",
+    "name": "MSS301 - Kafka → Elasticsearch (movie-events)",
+    "description": "Test luồng movie-service → topic movie-events → search-service → Elasticsearch trên stack Docker (`docker compose --profile app up -d --build`).\n\nMỗi kịch bản kiểm tra đủ 5 chặng: request API → offset topic tăng (SEND) → đọc message trên topic → committed offset của group search-service vượt qua message (RECEIVE) → document trong ES → Search API qua Gateway.\n\nPostman gọi REST API của Kafka UI (http://localhost:8090/api) nên tự kiểm tra được; chi tiết (partition, offset, header, payload) in ở **Console** (Ctrl+Alt+C).\n\nChạy: Runner cho folder 0 → 6 (giữ thứ tự). Folder 7 làm tay vì cần docker stop / start.\n\nSong song nên mở log: `docker compose logs -f movie-service search-service | grep -E \"Kafka SEND|Kafka RECEIVE|INDEX|MOVIE EVENT\"`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "0. Chuẩn bị & trạng thái ban đầu",
+      "description": "Chạy đầu tiên. Kiểm tra ES, Kafka UI, group search-service và ghi lại offset hiện tại của 2 topic.",
+      "item": [
+        {
+          "name": "Login admin (Keycloak)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": "{{kc}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "mss301-frontend"
+                },
+                {
+                  "key": "username",
+                  "value": "admin"
+                },
+                {
+                  "key": "password",
+                  "value": "123456"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('adminToken', pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Elasticsearch - cluster health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{es}}/_cluster/health"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('ES sống (green/yellow)', () => pm.expect(['green', 'yellow']).to.include(j.status));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Elasticsearch - số phim trong index",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{es}}/{{esIndex}}/_count"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Index tồn tại', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('esCount', pm.response.json().count);",
+                  "console.log('Index có', pm.response.json().count, 'document');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - danh sách topic",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics?showInternal=false&perPage=50"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const names = pm.response.json().topics.map(t => t.name);",
+                  "console.log(names);",
+                  "pm.test('Có topic movie-events và movie-events.DLT', () => {",
+                  "    pm.expect(names).to.include(pm.collectionVariables.get('topic'));",
+                  "    pm.expect(names).to.include(pm.collectionVariables.get('dlt'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - ghi lại offset movie-events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{topic}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const sumOffsets = (j, topic) => (j.partitions || []).reduce((s, p) => s + (p.offsetMax || 0), 0);",
+                  "",
+                  "const now = sumOffsets(pm.response.json());",
+                  "pm.collectionVariables.set('topicOffset', now);",
+                  "console.log('movie-events: tổng offset hiện tại', now);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - ghi lại offset movie-events.DLT",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{dlt}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const sumOffsets = (j, topic) => (j.partitions || []).reduce((s, p) => s + (p.offsetMax || 0), 0);",
+                  "",
+                  "const now = sumOffsets(pm.response.json());",
+                  "pm.collectionVariables.set('dltOffset', now);",
+                  "console.log('movie-events.DLT: đang có', now, 'message lỗi');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - group search-service",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/consumer-groups/{{group}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "console.log('state=' + j.state + ' members=' + j.members + ' lag=' + j.consumerLag);",
+                  "pm.test('search-service đang nghe topic (STABLE)', () => pm.expect(j.state).to.eql('STABLE'));",
+                  "pm.test('Không còn message tồn (lag = 0)', () => pm.expect(j.consumerLag || 0).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. MOVIE_CREATED - tạo phim",
+      "description": "POST phim → outbox → relay gửi MOVIE_CREATED → search-service index → tìm thấy qua /api/v1/search/movies.",
+      "item": [
+        {
+          "name": "Tạo phim (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/movies",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Kafka ES Test {{runTag}}\",\n  \"originalTitle\": \"Kafka Elasticsearch Flow\",\n  \"description\": \"Phim tạo bởi Postman để test luồng movie-events -> search-service.\",\n  \"durationMinutes\": 120,\n  \"releaseDate\": \"2026-11-01\",\n  \"ageRating\": \"T13\",\n  \"language\": \"Vietnamese\",\n  \"country\": \"Vietnam\",\n  \"posterUrl\": \"https://example.com/posters/kafka-es.jpg\",\n  \"status\": \"NOW_SHOWING\",\n  \"genreIds\": [\"{{genreId}}\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sinceTs', Date.now() - 2000);",
+                  "pm.collectionVariables.set('runTag', Date.now().toString().slice(-6));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const d = pm.response.json().data;",
+                  "pm.collectionVariables.set('movieId', d.id);",
+                  "pm.collectionVariables.set('movieTitle', d.title);",
+                  "console.log('movieId =', d.id, '| updatedAt =', d.updatedAt);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - offset movie-events tăng (SEND tới broker)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{topic}}",
+            "description": "Tổng offset (log-end) của các partition tăng = producer đã ghi message lên broker."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~20 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "const sumOffsets = (j, topic) => (j.partitions || []).reduce((s, p) => s + (p.offsetMax || 0), 0);",
+                  "",
+                  "const before = +(V('topicOffset') || 0);",
+                  "poll({ url: V('kui') + '/topics/' + encodeURIComponent(V('topic')), method: 'GET' },",
+                  "     res => sumOffsets(res.json()) >= before + 1, 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const sumOffsets = (j, topic) => (j.partitions || []).reduce((s, p) => s + (p.offsetMax || 0), 0);",
+                  "",
+                  "const j = pm.response.json();",
+                  "const before = +(pm.collectionVariables.get('topicOffset') || 0);",
+                  "const now = sumOffsets(j);",
+                  "console.log('movie-events: offset tổng ' + before + ' -> ' + now + ' (+' + (now - before) + ')', j.partitions.map(p => 'p' + p.partition + '=' + p.offsetMax).join(' '));",
+                  "pm.test('Producer đã gửi: tổng offset của movie-events tăng ít nhất ' + 1 + ' (' + before + ' -> ' + now + ')', () => pm.expect(now - before).to.be.at.least(1));",
+                  "pm.collectionVariables.set('topicOffset', now);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - đọc message MOVIE_CREATED trên topic",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{topic}}/messages?seekType=TIMESTAMP&seekTo=0::{{sinceTs}}&seekTo=1::{{sinceTs}}&seekTo=2::{{sinceTs}}&seekDirection=FORWARD&limit=100&q={{movieId}}&filterQueryType=STRING_CONTAINS",
+            "description": "Đọc message trên movie-events từ thời điểm gửi request (seek theo timestamp), lọc theo movieId. Lưu partition / offset / traceId để kiểm tra consumer và Zipkin."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Kafka UI trả về text/event-stream: mỗi dòng 'data:{...}'; lấy các event type=MESSAGE.",
+                  "const msgs = pm.response.text().split('\\n')",
+                  "    .filter(l => l.startsWith('data:'))",
+                  "    .map(l => { try { return JSON.parse(l.slice(5)); } catch (e) { return null; } })",
+                  "    .filter(e => e && e.type === 'MESSAGE').map(e => e.message);",
+                  "const parse = m => { try { return JSON.parse(m.content); } catch (e) { return {}; } };",
+                  "",
+                  "console.log('Số message của phim này kể từ lúc gửi request:', msgs.length);",
+                  "const m = msgs.filter(x => parse(x).eventType === 'MOVIE_CREATED' && String(x.key) === pm.collectionVariables.get('movieId')).pop();",
+                  "pm.test('Có message MOVIE_CREATED trên topic, key = movieId', () => pm.expect(m, 'không thấy message (xem tab Kafka UI)').to.exist);",
+                  "if (m) {",
+                  "    const body = parse(m);",
+                  "    console.log('SEND -> partition ' + m.partition + ', offset ' + m.offset + ', lúc ' + m.timestamp);",
+                  "    console.log('headers', m.headers);",
+                  "    console.log('payload', body);",
+                  "    pm.collectionVariables.set('eventPartition', m.partition);",
+                  "    pm.collectionVariables.set('eventOffset', m.offset);",
+                  "    pm.collectionVariables.set('eventVersion', body.version || '');",
+                  "    const tp = (m.headers || {}).traceparent;",
+                  "    pm.collectionVariables.set('traceId', tp ? tp.split('-')[1] : '');",
+                  "    pm.test('Payload là snapshot đầy đủ của phim', () => {",
+                  "        pm.expect(body.aggregateId).to.eql(pm.collectionVariables.get('movieId'));",
+                  "        pm.expect(body.payload).to.be.an('object');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - consumer search-service đã đọc (RECEIVE)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/consumer-groups/{{group}}",
+            "description": "Committed offset của group search-service ở partition chứa event > offset của event = listener đã nhận và xử lý xong (không ném lỗi)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~20 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "",
+                  "const p = +V('eventPartition'), o = +V('eventOffset');",
+                  "poll({ url: V('kui') + '/consumer-groups/' + V('group'), method: 'GET' }, res => {",
+                  "    const part = (res.json().partitions || []).find(x => x.topic === V('topic') && x.partition === p);",
+                  "    return part && part.currentOffset > o;",
+                  "}, 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const p = +pm.collectionVariables.get('eventPartition'), o = +pm.collectionVariables.get('eventOffset');",
+                  "const part = (j.partitions || []).find(x => x.topic === pm.collectionVariables.get('topic') && x.partition === p);",
+                  "console.log('Group ' + j.groupId + ': state=' + j.state + ', members=' + j.members + ', lag tổng=' + j.consumerLag);",
+                  "console.log((j.partitions || []).map(x => x.topic + '-' + x.partition + ': current=' + x.currentOffset + ' end=' + x.endOffset + ' lag=' + x.consumerLag + ' consumer=' + x.consumerId).join('\\n'));",
+                  "pm.test('search-service đang chạy (group STABLE, có member)', () => {",
+                  "    pm.expect(j.state).to.eql('STABLE');",
+                  "    pm.expect(j.members).to.be.above(0);",
+                  "});",
+                  "pm.test('Listener đã xử lý xong message (committed offset ' + (part && part.currentOffset) + ' > offset ' + o + ' ở partition ' + p + ')',",
+                  "    () => pm.expect(part && part.currentOffset).to.be.above(o));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Elasticsearch - document đã được index",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{es}}/{{esIndex}}/_doc/{{movieId}}",
+            "description": "Đọc thẳng document trong Elasticsearch (không qua search-service). _version = updatedAt của phim (external versioning)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~20 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "",
+                  "poll({ url: V('es') + '/' + V('esIndex') + '/_doc/' + V('movieId'), method: 'GET' }, res => res.code === 200 && res.json().found === true, 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Document có trong index', () => pm.expect(j.found).to.be.true);",
+                  "pm.test('Tiêu đề khớp', () => pm.expect(j._source.title).to.eql(pm.collectionVariables.get('movieTitle')));",
+                  "const ev = pm.collectionVariables.get('eventVersion');",
+                  "if (ev) pm.test('_version = version của event (' + ev + ')', () => pm.expect(String(j._version)).to.eql(String(ev)));",
+                  "pm.collectionVariables.set('esVersion', j._version);",
+                  "console.log(j._source);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search API - tìm thấy phim mới",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/search/movies?q={{runTag}}",
+            "description": "Đi qua Gateway → search-service → Elasticsearch, giống FE gọi."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~10 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "",
+                  "poll({ url: V('base') + '/api/v1/search/movies?q=' + V('runTag') + '', method: 'GET' }, res => (res.json().data.items || []).some(i => i.id === V('movieId')), 10, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const hit = pm.response.json().data.items.find(i => i.id === pm.collectionVariables.get('movieId'));",
+                  "pm.test('Kết quả có phim vừa tạo', () => pm.expect(hit).to.exist);",
+                  "if (hit) console.log(hit.title, hit.highlight);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Zipkin - trace producer → consumer (xem Console)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{zipkin}}/api/v2/trace/{{traceId}}",
+            "description": "Trace id lấy từ header traceparent của message. Mở http://localhost:9411/zipkin/traces/{traceId} để xem dạng biểu đồ."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('traceId')) {",
+                  "    console.log('Message không có header traceparent, bỏ qua Zipkin');",
+                  "} else {",
+                  "    pm.test('Zipkin có trace', () => pm.response.to.have.status(200));",
+                  "    if (pm.response.code === 200 && Array.isArray(pm.response.json())) {",
+                  "        const spans = pm.response.json();",
+                  "        const services = [...new Set(spans.map(s => s.localEndpoint && s.localEndpoint.serviceName))];",
+                  "        console.log('Trace ' + pm.collectionVariables.get('traceId') + ' đi qua: ' + services.join(' -> '));",
+                  "        spans.sort((a, b) => a.timestamp - b.timestamp).forEach(s => console.log(s.localEndpoint.serviceName + ' | ' + s.kind + ' | ' + s.name + ' | ' + (s.duration / 1000).toFixed(1) + 'ms'));",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. MOVIE_UPDATED - sửa phim",
+      "description": "PUT phim → MOVIE_UPDATED → document được ghi đè, _version tăng.",
+      "item": [
+        {
+          "name": "Sửa phim (đổi tên, thời lượng)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/movies/{{movieId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Kafka ES Updated {{runTag}}\",\n  \"originalTitle\": \"Kafka Elasticsearch Flow\",\n  \"description\": \"Phim tạo bởi Postman để test luồng movie-events -> search-service.\",\n  \"durationMinutes\": 135,\n  \"releaseDate\": \"2026-11-01\",\n  \"ageRating\": \"T13\",\n  \"language\": \"Vietnamese\",\n  \"country\": \"Vietnam\",\n  \"posterUrl\": \"https://example.com/posters/kafka-es.jpg\",\n  \"status\": \"NOW_SHOWING\",\n  \"genreIds\": [\"{{genreId}}\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sinceTs', Date.now() - 2000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('movieTitle', pm.response.json().data.title);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - offset movie-events tăng (SEND tới broker)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{topic}}",
+            "description": "Tổng offset (log-end) của các partition tăng = producer đã ghi message lên broker."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~20 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "const sumOffsets = (j, topic) => (j.partitions || []).reduce((s, p) => s + (p.offsetMax || 0), 0);",
+                  "",
+                  "const before = +(V('topicOffset') || 0);",
+                  "poll({ url: V('kui') + '/topics/' + encodeURIComponent(V('topic')), method: 'GET' },",
+                  "     res => sumOffsets(res.json()) >= before + 1, 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const sumOffsets = (j, topic) => (j.partitions || []).reduce((s, p) => s + (p.offsetMax || 0), 0);",
+                  "",
+                  "const j = pm.response.json();",
+                  "const before = +(pm.collectionVariables.get('topicOffset') || 0);",
+                  "const now = sumOffsets(j);",
+                  "console.log('movie-events: offset tổng ' + before + ' -> ' + now + ' (+' + (now - before) + ')', j.partitions.map(p => 'p' + p.partition + '=' + p.offsetMax).join(' '));",
+                  "pm.test('Producer đã gửi: tổng offset của movie-events tăng ít nhất ' + 1 + ' (' + before + ' -> ' + now + ')', () => pm.expect(now - before).to.be.at.least(1));",
+                  "pm.collectionVariables.set('topicOffset', now);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - đọc message MOVIE_UPDATED trên topic",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{topic}}/messages?seekType=TIMESTAMP&seekTo=0::{{sinceTs}}&seekTo=1::{{sinceTs}}&seekTo=2::{{sinceTs}}&seekDirection=FORWARD&limit=100&q={{movieId}}&filterQueryType=STRING_CONTAINS",
+            "description": "Đọc message trên movie-events từ thời điểm gửi request (seek theo timestamp), lọc theo movieId. Lưu partition / offset / traceId để kiểm tra consumer và Zipkin."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Kafka UI trả về text/event-stream: mỗi dòng 'data:{...}'; lấy các event type=MESSAGE.",
+                  "const msgs = pm.response.text().split('\\n')",
+                  "    .filter(l => l.startsWith('data:'))",
+                  "    .map(l => { try { return JSON.parse(l.slice(5)); } catch (e) { return null; } })",
+                  "    .filter(e => e && e.type === 'MESSAGE').map(e => e.message);",
+                  "const parse = m => { try { return JSON.parse(m.content); } catch (e) { return {}; } };",
+                  "",
+                  "console.log('Số message của phim này kể từ lúc gửi request:', msgs.length);",
+                  "const m = msgs.filter(x => parse(x).eventType === 'MOVIE_UPDATED' && String(x.key) === pm.collectionVariables.get('movieId')).pop();",
+                  "pm.test('Có message MOVIE_UPDATED trên topic, key = movieId', () => pm.expect(m, 'không thấy message (xem tab Kafka UI)').to.exist);",
+                  "if (m) {",
+                  "    const body = parse(m);",
+                  "    console.log('SEND -> partition ' + m.partition + ', offset ' + m.offset + ', lúc ' + m.timestamp);",
+                  "    console.log('headers', m.headers);",
+                  "    console.log('payload', body);",
+                  "    pm.collectionVariables.set('eventPartition', m.partition);",
+                  "    pm.collectionVariables.set('eventOffset', m.offset);",
+                  "    pm.collectionVariables.set('eventVersion', body.version || '');",
+                  "    const tp = (m.headers || {}).traceparent;",
+                  "    pm.collectionVariables.set('traceId', tp ? tp.split('-')[1] : '');",
+                  "    pm.test('Payload là snapshot đầy đủ của phim', () => {",
+                  "        pm.expect(body.aggregateId).to.eql(pm.collectionVariables.get('movieId'));",
+                  "        pm.expect(body.payload).to.be.an('object');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - consumer search-service đã đọc (RECEIVE)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/consumer-groups/{{group}}",
+            "description": "Committed offset của group search-service ở partition chứa event > offset của event = listener đã nhận và xử lý xong (không ném lỗi)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~20 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "",
+                  "const p = +V('eventPartition'), o = +V('eventOffset');",
+                  "poll({ url: V('kui') + '/consumer-groups/' + V('group'), method: 'GET' }, res => {",
+                  "    const part = (res.json().partitions || []).find(x => x.topic === V('topic') && x.partition === p);",
+                  "    return part && part.currentOffset > o;",
+                  "}, 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const p = +pm.collectionVariables.get('eventPartition'), o = +pm.collectionVariables.get('eventOffset');",
+                  "const part = (j.partitions || []).find(x => x.topic === pm.collectionVariables.get('topic') && x.partition === p);",
+                  "console.log('Group ' + j.groupId + ': state=' + j.state + ', members=' + j.members + ', lag tổng=' + j.consumerLag);",
+                  "console.log((j.partitions || []).map(x => x.topic + '-' + x.partition + ': current=' + x.currentOffset + ' end=' + x.endOffset + ' lag=' + x.consumerLag + ' consumer=' + x.consumerId).join('\\n'));",
+                  "pm.test('search-service đang chạy (group STABLE, có member)', () => {",
+                  "    pm.expect(j.state).to.eql('STABLE');",
+                  "    pm.expect(j.members).to.be.above(0);",
+                  "});",
+                  "pm.test('Listener đã xử lý xong message (committed offset ' + (part && part.currentOffset) + ' > offset ' + o + ' ở partition ' + p + ')',",
+                  "    () => pm.expect(part && part.currentOffset).to.be.above(o));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Elasticsearch - document đã cập nhật",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{es}}/{{esIndex}}/_doc/{{movieId}}",
+            "description": "Đọc thẳng document trong Elasticsearch (không qua search-service). _version = updatedAt của phim (external versioning)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~20 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "",
+                  "poll({ url: V('es') + '/' + V('esIndex') + '/_doc/' + V('movieId'), method: 'GET' }, res => res.code === 200 && res.json()._source.title === V('movieTitle'), 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "pm.test('Tiêu đề mới đã vào index', () => pm.expect(j._source.title).to.eql(pm.collectionVariables.get('movieTitle')));",
+                  "pm.test('Thời lượng mới = 135', () => pm.expect(j._source.durationMinutes).to.eql(135));",
+                  "const prev = +pm.collectionVariables.get('esVersion');",
+                  "pm.test('_version tăng (' + prev + ' -> ' + j._version + ')', () => pm.expect(j._version).to.be.above(prev));",
+                  "pm.collectionVariables.set('esVersion', j._version);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search API - thấy tên mới",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/search/movies?q={{runTag}}",
+            "description": "Đi qua Gateway → search-service → Elasticsearch, giống FE gọi."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~10 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "",
+                  "poll({ url: V('base') + '/api/v1/search/movies?q=' + V('runTag') + '', method: 'GET' }, res => (res.json().data.items || []).some(i => i.id === V('movieId') && i.title === V('movieTitle')), 10, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const hit = pm.response.json().data.items.find(i => i.id === pm.collectionVariables.get('movieId'));",
+                  "pm.test('Search trả về tên mới', () => pm.expect(hit && hit.title).to.eql(pm.collectionVariables.get('movieTitle')));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. MOVIE_STATUS_CHANGED - đổi trạng thái",
+      "description": "PATCH status → MOVIE_STATUS_CHANGED → field status trong ES đổi theo.",
+      "item": [
+        {
+          "name": "Đổi trạng thái sang COMING_SOON",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/movies/{{movieId}}/status",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"{{newStatus}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sinceTs', Date.now() - 2000);",
+                  "pm.collectionVariables.set('newStatus', 'COMING_SOON');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Trạng thái mới', () => pm.expect(pm.response.json().data.status).to.eql('COMING_SOON'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - offset movie-events tăng (SEND tới broker)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{topic}}",
+            "description": "Tổng offset (log-end) của các partition tăng = producer đã ghi message lên broker."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~20 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "const sumOffsets = (j, topic) => (j.partitions || []).reduce((s, p) => s + (p.offsetMax || 0), 0);",
+                  "",
+                  "const before = +(V('topicOffset') || 0);",
+                  "poll({ url: V('kui') + '/topics/' + encodeURIComponent(V('topic')), method: 'GET' },",
+                  "     res => sumOffsets(res.json()) >= before + 1, 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const sumOffsets = (j, topic) => (j.partitions || []).reduce((s, p) => s + (p.offsetMax || 0), 0);",
+                  "",
+                  "const j = pm.response.json();",
+                  "const before = +(pm.collectionVariables.get('topicOffset') || 0);",
+                  "const now = sumOffsets(j);",
+                  "console.log('movie-events: offset tổng ' + before + ' -> ' + now + ' (+' + (now - before) + ')', j.partitions.map(p => 'p' + p.partition + '=' + p.offsetMax).join(' '));",
+                  "pm.test('Producer đã gửi: tổng offset của movie-events tăng ít nhất ' + 1 + ' (' + before + ' -> ' + now + ')', () => pm.expect(now - before).to.be.at.least(1));",
+                  "pm.collectionVariables.set('topicOffset', now);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - đọc message MOVIE_STATUS_CHANGED trên topic",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{topic}}/messages?seekType=TIMESTAMP&seekTo=0::{{sinceTs}}&seekTo=1::{{sinceTs}}&seekTo=2::{{sinceTs}}&seekDirection=FORWARD&limit=100&q={{movieId}}&filterQueryType=STRING_CONTAINS",
+            "description": "Đọc message trên movie-events từ thời điểm gửi request (seek theo timestamp), lọc theo movieId. Lưu partition / offset / traceId để kiểm tra consumer và Zipkin."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Kafka UI trả về text/event-stream: mỗi dòng 'data:{...}'; lấy các event type=MESSAGE.",
+                  "const msgs = pm.response.text().split('\\n')",
+                  "    .filter(l => l.startsWith('data:'))",
+                  "    .map(l => { try { return JSON.parse(l.slice(5)); } catch (e) { return null; } })",
+                  "    .filter(e => e && e.type === 'MESSAGE').map(e => e.message);",
+                  "const parse = m => { try { return JSON.parse(m.content); } catch (e) { return {}; } };",
+                  "",
+                  "console.log('Số message của phim này kể từ lúc gửi request:', msgs.length);",
+                  "const m = msgs.filter(x => parse(x).eventType === 'MOVIE_STATUS_CHANGED' && String(x.key) === pm.collectionVariables.get('movieId')).pop();",
+                  "pm.test('Có message MOVIE_STATUS_CHANGED trên topic, key = movieId', () => pm.expect(m, 'không thấy message (xem tab Kafka UI)').to.exist);",
+                  "if (m) {",
+                  "    const body = parse(m);",
+                  "    console.log('SEND -> partition ' + m.partition + ', offset ' + m.offset + ', lúc ' + m.timestamp);",
+                  "    console.log('headers', m.headers);",
+                  "    console.log('payload', body);",
+                  "    pm.collectionVariables.set('eventPartition', m.partition);",
+                  "    pm.collectionVariables.set('eventOffset', m.offset);",
+                  "    pm.collectionVariables.set('eventVersion', body.version || '');",
+                  "    const tp = (m.headers || {}).traceparent;",
+                  "    pm.collectionVariables.set('traceId', tp ? tp.split('-')[1] : '');",
+                  "    pm.test('Payload là snapshot đầy đủ của phim', () => {",
+                  "        pm.expect(body.aggregateId).to.eql(pm.collectionVariables.get('movieId'));",
+                  "        pm.expect(body.payload).to.be.an('object');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - consumer search-service đã đọc (RECEIVE)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/consumer-groups/{{group}}",
+            "description": "Committed offset của group search-service ở partition chứa event > offset của event = listener đã nhận và xử lý xong (không ném lỗi)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~20 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "",
+                  "const p = +V('eventPartition'), o = +V('eventOffset');",
+                  "poll({ url: V('kui') + '/consumer-groups/' + V('group'), method: 'GET' }, res => {",
+                  "    const part = (res.json().partitions || []).find(x => x.topic === V('topic') && x.partition === p);",
+                  "    return part && part.currentOffset > o;",
+                  "}, 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const p = +pm.collectionVariables.get('eventPartition'), o = +pm.collectionVariables.get('eventOffset');",
+                  "const part = (j.partitions || []).find(x => x.topic === pm.collectionVariables.get('topic') && x.partition === p);",
+                  "console.log('Group ' + j.groupId + ': state=' + j.state + ', members=' + j.members + ', lag tổng=' + j.consumerLag);",
+                  "console.log((j.partitions || []).map(x => x.topic + '-' + x.partition + ': current=' + x.currentOffset + ' end=' + x.endOffset + ' lag=' + x.consumerLag + ' consumer=' + x.consumerId).join('\\n'));",
+                  "pm.test('search-service đang chạy (group STABLE, có member)', () => {",
+                  "    pm.expect(j.state).to.eql('STABLE');",
+                  "    pm.expect(j.members).to.be.above(0);",
+                  "});",
+                  "pm.test('Listener đã xử lý xong message (committed offset ' + (part && part.currentOffset) + ' > offset ' + o + ' ở partition ' + p + ')',",
+                  "    () => pm.expect(part && part.currentOffset).to.be.above(o));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Elasticsearch - status = COMING_SOON",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{es}}/{{esIndex}}/_doc/{{movieId}}",
+            "description": "Đọc thẳng document trong Elasticsearch (không qua search-service). _version = updatedAt của phim (external versioning)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~20 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "",
+                  "poll({ url: V('es') + '/' + V('esIndex') + '/_doc/' + V('movieId'), method: 'GET' }, res => res.code === 200 && res.json()._source.status === V('newStatus'), 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status trong ES = COMING_SOON', () => pm.expect(pm.response.json()._source.status).to.eql('COMING_SOON'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search API - lọc status=COMING_SOON thấy phim",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/search/movies?q={{runTag}}&status={{newStatus}}",
+            "description": "Đi qua Gateway → search-service → Elasticsearch, giống FE gọi."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~10 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "",
+                  "poll({ url: V('base') + '/api/v1/search/movies?q=' + V('runTag') + '&status=' + V('newStatus') + '', method: 'GET' }, res => (res.json().data.items || []).some(i => i.id === V('movieId')), 10, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Lọc theo status mới có phim', () => pm.expect(pm.response.json().data.items.map(i => i.id)).to.include(pm.collectionVariables.get('movieId')));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. MOVIE_ARCHIVED - xoá mềm",
+      "description": "DELETE phim → MOVIE_ARCHIVED → search-service xoá document khỏi index.",
+      "item": [
+        {
+          "name": "Xoá mềm phim (ARCHIVED)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/movies/{{movieId}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sinceTs', Date.now() - 2000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - offset movie-events tăng (SEND tới broker)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{topic}}",
+            "description": "Tổng offset (log-end) của các partition tăng = producer đã ghi message lên broker."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~20 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "const sumOffsets = (j, topic) => (j.partitions || []).reduce((s, p) => s + (p.offsetMax || 0), 0);",
+                  "",
+                  "const before = +(V('topicOffset') || 0);",
+                  "poll({ url: V('kui') + '/topics/' + encodeURIComponent(V('topic')), method: 'GET' },",
+                  "     res => sumOffsets(res.json()) >= before + 1, 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const sumOffsets = (j, topic) => (j.partitions || []).reduce((s, p) => s + (p.offsetMax || 0), 0);",
+                  "",
+                  "const j = pm.response.json();",
+                  "const before = +(pm.collectionVariables.get('topicOffset') || 0);",
+                  "const now = sumOffsets(j);",
+                  "console.log('movie-events: offset tổng ' + before + ' -> ' + now + ' (+' + (now - before) + ')', j.partitions.map(p => 'p' + p.partition + '=' + p.offsetMax).join(' '));",
+                  "pm.test('Producer đã gửi: tổng offset của movie-events tăng ít nhất ' + 1 + ' (' + before + ' -> ' + now + ')', () => pm.expect(now - before).to.be.at.least(1));",
+                  "pm.collectionVariables.set('topicOffset', now);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - đọc message MOVIE_ARCHIVED trên topic",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{topic}}/messages?seekType=TIMESTAMP&seekTo=0::{{sinceTs}}&seekTo=1::{{sinceTs}}&seekTo=2::{{sinceTs}}&seekDirection=FORWARD&limit=100&q={{movieId}}&filterQueryType=STRING_CONTAINS",
+            "description": "Đọc message trên movie-events từ thời điểm gửi request (seek theo timestamp), lọc theo movieId. Lưu partition / offset / traceId để kiểm tra consumer và Zipkin."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Kafka UI trả về text/event-stream: mỗi dòng 'data:{...}'; lấy các event type=MESSAGE.",
+                  "const msgs = pm.response.text().split('\\n')",
+                  "    .filter(l => l.startsWith('data:'))",
+                  "    .map(l => { try { return JSON.parse(l.slice(5)); } catch (e) { return null; } })",
+                  "    .filter(e => e && e.type === 'MESSAGE').map(e => e.message);",
+                  "const parse = m => { try { return JSON.parse(m.content); } catch (e) { return {}; } };",
+                  "",
+                  "console.log('Số message của phim này kể từ lúc gửi request:', msgs.length);",
+                  "const m = msgs.filter(x => parse(x).eventType === 'MOVIE_ARCHIVED' && String(x.key) === pm.collectionVariables.get('movieId')).pop();",
+                  "pm.test('Có message MOVIE_ARCHIVED trên topic, key = movieId', () => pm.expect(m, 'không thấy message (xem tab Kafka UI)').to.exist);",
+                  "if (m) {",
+                  "    const body = parse(m);",
+                  "    console.log('SEND -> partition ' + m.partition + ', offset ' + m.offset + ', lúc ' + m.timestamp);",
+                  "    console.log('headers', m.headers);",
+                  "    console.log('payload', body);",
+                  "    pm.collectionVariables.set('eventPartition', m.partition);",
+                  "    pm.collectionVariables.set('eventOffset', m.offset);",
+                  "    pm.collectionVariables.set('eventVersion', body.version || '');",
+                  "    const tp = (m.headers || {}).traceparent;",
+                  "    pm.collectionVariables.set('traceId', tp ? tp.split('-')[1] : '');",
+                  "    pm.test('Payload là snapshot đầy đủ của phim', () => {",
+                  "        pm.expect(body.aggregateId).to.eql(pm.collectionVariables.get('movieId'));",
+                  "        pm.expect(body.payload).to.be.an('object');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - consumer search-service đã đọc (RECEIVE)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/consumer-groups/{{group}}",
+            "description": "Committed offset của group search-service ở partition chứa event > offset của event = listener đã nhận và xử lý xong (không ném lỗi)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~20 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "",
+                  "const p = +V('eventPartition'), o = +V('eventOffset');",
+                  "poll({ url: V('kui') + '/consumer-groups/' + V('group'), method: 'GET' }, res => {",
+                  "    const part = (res.json().partitions || []).find(x => x.topic === V('topic') && x.partition === p);",
+                  "    return part && part.currentOffset > o;",
+                  "}, 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "const p = +pm.collectionVariables.get('eventPartition'), o = +pm.collectionVariables.get('eventOffset');",
+                  "const part = (j.partitions || []).find(x => x.topic === pm.collectionVariables.get('topic') && x.partition === p);",
+                  "console.log('Group ' + j.groupId + ': state=' + j.state + ', members=' + j.members + ', lag tổng=' + j.consumerLag);",
+                  "console.log((j.partitions || []).map(x => x.topic + '-' + x.partition + ': current=' + x.currentOffset + ' end=' + x.endOffset + ' lag=' + x.consumerLag + ' consumer=' + x.consumerId).join('\\n'));",
+                  "pm.test('search-service đang chạy (group STABLE, có member)', () => {",
+                  "    pm.expect(j.state).to.eql('STABLE');",
+                  "    pm.expect(j.members).to.be.above(0);",
+                  "});",
+                  "pm.test('Listener đã xử lý xong message (committed offset ' + (part && part.currentOffset) + ' > offset ' + o + ' ở partition ' + p + ')',",
+                  "    () => pm.expect(part && part.currentOffset).to.be.above(o));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Elasticsearch - document đã bị xoá (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{es}}/{{esIndex}}/_doc/{{movieId}}",
+            "description": "Đọc thẳng document trong Elasticsearch (không qua search-service). _version = updatedAt của phim (external versioning)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~20 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "",
+                  "poll({ url: V('es') + '/' + V('esIndex') + '/_doc/' + V('movieId'), method: 'GET' }, res => res.code === 404, 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('ES trả 404 / found=false', () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().found).to.be.false;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search API - không còn phim",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/search/movies?q={{runTag}}",
+            "description": "Đi qua Gateway → search-service → Elasticsearch, giống FE gọi."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~10 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "",
+                  "poll({ url: V('base') + '/api/v1/search/movies?q=' + V('runTag') + '', method: 'GET' }, res => !(res.json().data.items || []).some(i => i.id === V('movieId')), 10, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Không còn trong kết quả', () => pm.expect(pm.response.json().data.items.map(i => i.id)).to.not.include(pm.collectionVariables.get('movieId')));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5. MOVIE_SYNCED - đồng bộ lại toàn bộ",
+      "description": "POST search-sync → gửi lại mọi phim (MOVIE_SYNCED) → lag về 0, số document = số phim chưa ARCHIVED.",
+      "item": [
+        {
+          "name": "Đồng bộ lại toàn bộ (search-sync)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/movies/search-sync"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sinceTs', Date.now() - 2000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "const q = pm.response.json().data.queued;",
+                  "pm.collectionVariables.set('queued', q);",
+                  "console.log('Đã xếp hàng', q, 'phim vào outbox');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - offset movie-events tăng (SEND tới broker)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{topic}}",
+            "description": "Tổng offset (log-end) của các partition tăng = producer đã ghi message lên broker."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~20 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "const sumOffsets = (j, topic) => (j.partitions || []).reduce((s, p) => s + (p.offsetMax || 0), 0);",
+                  "",
+                  "const before = +(V('topicOffset') || 0);",
+                  "poll({ url: V('kui') + '/topics/' + encodeURIComponent(V('topic')), method: 'GET' },",
+                  "     res => sumOffsets(res.json()) >= before + (+pm.collectionVariables.get('queued') || 1), 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const sumOffsets = (j, topic) => (j.partitions || []).reduce((s, p) => s + (p.offsetMax || 0), 0);",
+                  "",
+                  "const j = pm.response.json();",
+                  "const before = +(pm.collectionVariables.get('topicOffset') || 0);",
+                  "const now = sumOffsets(j);",
+                  "console.log('movie-events: offset tổng ' + before + ' -> ' + now + ' (+' + (now - before) + ')', j.partitions.map(p => 'p' + p.partition + '=' + p.offsetMax).join(' '));",
+                  "pm.test('Producer đã gửi: tổng offset của movie-events tăng ít nhất ' + (+pm.collectionVariables.get('queued') || 1) + ' (' + before + ' -> ' + now + ')', () => pm.expect(now - before).to.be.at.least((+pm.collectionVariables.get('queued') || 1)));",
+                  "pm.collectionVariables.set('topicOffset', now);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - đọc các message MOVIE_SYNCED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{topic}}/messages?seekType=TIMESTAMP&seekTo=0::{{sinceTs}}&seekTo=1::{{sinceTs}}&seekTo=2::{{sinceTs}}&seekDirection=FORWARD&limit=100&q=MOVIE_SYNCED&filterQueryType=STRING_CONTAINS"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Kafka UI trả về text/event-stream: mỗi dòng 'data:{...}'; lấy các event type=MESSAGE.",
+                  "const msgs = pm.response.text().split('\\n')",
+                  "    .filter(l => l.startsWith('data:'))",
+                  "    .map(l => { try { return JSON.parse(l.slice(5)); } catch (e) { return null; } })",
+                  "    .filter(e => e && e.type === 'MESSAGE').map(e => e.message);",
+                  "const parse = m => { try { return JSON.parse(m.content); } catch (e) { return {}; } };",
+                  "",
+                  "console.log('Đọc được', msgs.length, 'message MOVIE_SYNCED (Kafka UI giới hạn 100 / lần)');",
+                  "const byPart = {};",
+                  "msgs.forEach(m => byPart[m.partition] = (byPart[m.partition] || 0) + 1);",
+                  "console.log('Theo partition:', byPart);",
+                  "msgs.slice(0, 10).forEach(m => console.log('p' + m.partition + '@' + m.offset + ' key=' + m.key + ' ' + parse(m).payload.title));",
+                  "pm.test('Có message MOVIE_SYNCED', () => pm.expect(msgs.length).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - consumer xử lý hết (lag = 0)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/consumer-groups/{{group}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~30 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "",
+                  "poll({ url: V('kui') + '/consumer-groups/' + V('group'), method: 'GET' }, res => (res.json().consumerLag || 0) === 0, 30, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "console.log((j.partitions || []).map(x => x.topic + '-' + x.partition + ': current=' + x.currentOffset + ' end=' + x.endOffset + ' lag=' + x.consumerLag).join('\\n'));",
+                  "pm.test('Lag = 0: search-service đã đọc hết', () => pm.expect(j.consumerLag || 0).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Elasticsearch - đếm document",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{es}}/{{esIndex}}/_count"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const c = pm.response.json().count;",
+                  "console.log('Index có', c, 'document; movie-service gửi', pm.collectionVariables.get('queued'), 'phim (gồm cả ARCHIVED, bị xoá khỏi index)');",
+                  "pm.test('Index có dữ liệu', () => pm.expect(c).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6. Message hỏng → movie-events.DLT",
+      "description": "Gửi thẳng 1 message không phải JSON lên movie-events bằng API của Kafka UI. search-service ném IllegalArgumentException (không retry) → chuyển ngay sang movie-events.DLT, partition chạy tiếp. Log search-service: 'MOVIE EVENT -> DLT ...'.",
+      "item": [
+        {
+          "name": "Kafka UI - ghi lại offset DLT",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{dlt}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('dltTag', 'dlt-test-' + Date.now().toString().slice(-6));",
+                  "pm.collectionVariables.set('sinceTs', Date.now() - 2000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const sumOffsets = (j, topic) => (j.partitions || []).reduce((s, p) => s + (p.offsetMax || 0), 0);",
+                  "pm.collectionVariables.set('dltOffset', sumOffsets(pm.response.json()));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gửi message hỏng lên movie-events (Kafka UI produce)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{kui}}/topics/{{topic}}/messages",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"partition\": 0,\n  \"key\": \"{{dltTag}}\",\n  \"content\": \"day-khong-phai-json {{dltTag}}\",\n  \"keySerde\": \"String\",\n  \"valueSerde\": \"String\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Kafka UI đã gửi (HTTP 200)', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - offset movie-events.DLT tăng (SEND tới broker)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{dlt}}",
+            "description": "Tổng offset (log-end) của các partition tăng = producer đã ghi message lên broker."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~20 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "const sumOffsets = (j, topic) => (j.partitions || []).reduce((s, p) => s + (p.offsetMax || 0), 0);",
+                  "",
+                  "const before = +(V('dltOffset') || 0);",
+                  "poll({ url: V('kui') + '/topics/' + encodeURIComponent(V('dlt')), method: 'GET' },",
+                  "     res => sumOffsets(res.json()) >= before + 1, 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const sumOffsets = (j, topic) => (j.partitions || []).reduce((s, p) => s + (p.offsetMax || 0), 0);",
+                  "",
+                  "const j = pm.response.json();",
+                  "const before = +(pm.collectionVariables.get('dltOffset') || 0);",
+                  "const now = sumOffsets(j);",
+                  "console.log('movie-events.DLT: offset tổng ' + before + ' -> ' + now + ' (+' + (now - before) + ')', j.partitions.map(p => 'p' + p.partition + '=' + p.offsetMax).join(' '));",
+                  "pm.test('Producer đã gửi: tổng offset của movie-events.DLT tăng ít nhất ' + 1 + ' (' + before + ' -> ' + now + ')', () => pm.expect(now - before).to.be.at.least(1));",
+                  "pm.collectionVariables.set('dltOffset', now);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - đọc message trong DLT (xem header lỗi)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{dlt}}/messages?seekType=TIMESTAMP&seekTo=0::{{sinceTs}}&seekTo=1::{{sinceTs}}&seekTo=2::{{sinceTs}}&seekDirection=FORWARD&limit=20&q={{dltTag}}&filterQueryType=STRING_CONTAINS"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Kafka UI trả về text/event-stream: mỗi dòng 'data:{...}'; lấy các event type=MESSAGE.",
+                  "const msgs = pm.response.text().split('\\n')",
+                  "    .filter(l => l.startsWith('data:'))",
+                  "    .map(l => { try { return JSON.parse(l.slice(5)); } catch (e) { return null; } })",
+                  "    .filter(e => e && e.type === 'MESSAGE').map(e => e.message);",
+                  "const parse = m => { try { return JSON.parse(m.content); } catch (e) { return {}; } };",
+                  "",
+                  "const m = msgs.find(x => x.key === pm.collectionVariables.get('dltTag'));",
+                  "pm.test('Message hỏng đã nằm trong DLT', () => pm.expect(m).to.exist);",
+                  "if (m) {",
+                  "    const h = m.headers || {};",
+                  "    console.log('Nguồn gốc:', h['kafka_dlt-original-topic'] + '-' + h['kafka_dlt-original-partition'] + '@' + h['kafka_dlt-original-offset']);",
+                  "    console.log('Lỗi:', h['kafka_dlt-exception-fqcn'], '-', h['kafka_dlt-exception-message']);",
+                  "    pm.test('Header ghi lý do lỗi', () => pm.expect(h['kafka_dlt-exception-message'] || h['kafka_dlt-exception-cause-fqcn']).to.exist);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kafka UI - partition 0 không bị kẹt (lag = 0)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/consumer-groups/{{group}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~20 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "",
+                  "poll({ url: V('kui') + '/consumer-groups/' + V('group'), method: 'GET' }, res => ((res.json().partitions || []).find(x => x.topic === V('topic') && x.partition === 0) || {}).consumerLag === 0, 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const part = pm.response.json().partitions.find(x => x.topic === pm.collectionVariables.get('topic') && x.partition === 0);",
+                  "pm.test('movie-events-0 đã đi tiếp sau message hỏng', () => pm.expect(part.consumerLag).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "7. (Thủ công) Elasticsearch chết → retry → hồi phục",
+      "description": "Chạy TỪNG request bằng tay, không dùng Runner.\n\n1. Terminal: `docker stop elasticsearch`\n2. Gửi 7.1 → 7.3. Log search-service sẽ hiện `MOVIE EVENT retry 1, 2, 3 ...` (backoff 1s, 2s, 4s ... tối đa 30s).\n3. Trong vòng 5 phút: `docker start elasticsearch`, đợi ES healthy (~30s).\n4. Gửi 7.4 → 7.5: event được index, lag về 0, không mất gì.\nĐể quá 5 phút thì message vào movie-events.DLT; sửa bằng folder 5 (search-sync).",
+      "item": [
+        {
+          "name": "7.1 Tạo phim khi ES đang tắt",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/movies",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Kafka ES Test {{runTag}}\",\n  \"originalTitle\": \"Kafka Elasticsearch Flow\",\n  \"description\": \"Phim tạo bởi Postman để test luồng movie-events -> search-service.\",\n  \"durationMinutes\": 120,\n  \"releaseDate\": \"2026-11-01\",\n  \"ageRating\": \"T13\",\n  \"language\": \"Vietnamese\",\n  \"country\": \"Vietnam\",\n  \"posterUrl\": \"https://example.com/posters/kafka-es.jpg\",\n  \"status\": \"NOW_SHOWING\",\n  \"genreIds\": [\"{{genreId}}\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sinceTs', Date.now() - 2000);",
+                  "pm.collectionVariables.set('runTag', Date.now().toString().slice(-6));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('movie-service vẫn tạo được (HTTP 201) dù ES chết', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('movieId', pm.response.json().data.id);",
+                  "pm.collectionVariables.set('movieTitle', pm.response.json().data.title);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7.2 Search API khi ES chết → 503",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/search/movies?q={{runTag}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "console.log(pm.response.code, pm.response.text());",
+                  "pm.test('search-service trả 503', () => pm.response.to.have.status(503));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7.3 Kafka UI - consumer đang kẹt retry (lag > 0)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/consumer-groups/{{group}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~10 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "",
+                  "poll({ url: V('kui') + '/consumer-groups/' + V('group'), method: 'GET' }, res => (res.json().consumerLag || 0) > 0, 10, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "console.log((j.partitions || []).map(x => x.topic + '-' + x.partition + ': current=' + x.currentOffset + ' end=' + x.endOffset + ' lag=' + x.consumerLag).join('\\n'));",
+                  "pm.test('Có message chưa commit (lag > 0) vì listener đang retry', () => pm.expect(j.consumerLag).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7.4 [sau docker start] Elasticsearch - phim đã được index",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{es}}/{{esIndex}}/_doc/{{movieId}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~40 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "",
+                  "poll({ url: V('es') + '/' + V('esIndex') + '/_doc/' + V('movieId'), method: 'GET' }, res => res.code === 200 && res.json().found === true, 40, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Document có trong index sau khi ES sống lại', () => pm.expect(pm.response.json().found).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7.5 Kafka UI - lag về 0",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/consumer-groups/{{group}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~20 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "",
+                  "poll({ url: V('kui') + '/consumer-groups/' + V('group'), method: 'GET' }, res => (res.json().consumerLag || 0) === 0, 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Lag = 0', () => pm.expect(pm.response.json().consumerLag || 0).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "kc",
+      "value": "http://localhost:8180/realms/mss301/protocol/openid-connect/token"
+    },
+    {
+      "key": "kui",
+      "value": "http://localhost:8090/api/clusters/local"
+    },
+    {
+      "key": "es",
+      "value": "http://localhost:9200"
+    },
+    {
+      "key": "esIndex",
+      "value": "movies"
+    },
+    {
+      "key": "zipkin",
+      "value": "http://localhost:9411"
+    },
+    {
+      "key": "topic",
+      "value": "movie-events"
+    },
+    {
+      "key": "dlt",
+      "value": "movie-events.DLT"
+    },
+    {
+      "key": "group",
+      "value": "search-service"
+    },
+    {
+      "key": "genreId",
+      "value": "21000000-0000-0000-0000-000000000005"
+    }
+  ]
+}

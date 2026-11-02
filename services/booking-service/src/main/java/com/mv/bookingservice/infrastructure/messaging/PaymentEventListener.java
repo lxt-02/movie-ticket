@@ -13,7 +13,8 @@ import org.springframework.stereotype.Component;
  * Consumes payment-events from payment-service.
  * <ul>
  *     <li>{@link #onMessage}: the main topic. Technical errors are retried with backoff, then the record goes to
- *     {@code payment-events.DLT} (see KafkaConfig).</li>
+ *     {@code payment-events.DLT} (see KafkaConfig). An unreadable record (malformed JSON, no eventId) goes to the
+ *     DLT at once, without retries ({@link NonRetryableMessageException}).</li>
  *     <li>{@link #onDeadLetter}: replays the DLT. Not started on boot: started on demand once the cause is fixed
  *     (POST /api/v1/bookings/admin/payment-events-dlt/replay). Safe to replay: the inbox skips events already
  *     applied.</li>
@@ -51,7 +52,13 @@ public class PaymentEventListener {
     public void onDeadLetter(ConsumerRecord<String, String> record) {
         log.warn("DLT REPLAY topic={} partition={} offset={} key={} body={}",
                 record.topic(), record.partition(), record.offset(), record.key(), record.value());
-        process(record);
+        try {
+            process(record);
+        } catch (NonRetryableMessageException e) {
+            // Still unreadable: it stays in the DLT (Kafka keeps it), do not send it to the DLT again (loop).
+            log.error("DLT REPLAY skipped unreadable record {}-{}@{}: {}",
+                    record.topic(), record.partition(), record.offset(), e.getMessage());
+        }
     }
 
     private void process(ConsumerRecord<String, String> record) {
@@ -59,9 +66,13 @@ public class PaymentEventListener {
         try {
             message = json.read(record.value(), PaymentEventMessage.class);
         } catch (IllegalArgumentException e) {
-            log.error("Dropping malformed payment event at {}-{}@{}: {}",
+            // Not dropped: straight to payment-events.DLT (no retry), so the event is kept for investigation.
+            log.error("Malformed payment event at {}-{}@{}, sending it to the DLT: {}",
                     record.topic(), record.partition(), record.offset(), e.getMessage());
-            return;
+            throw new NonRetryableMessageException("Malformed payment event: " + e.getMessage(), e);
+        }
+        if (message.eventId() == null || message.eventType() == null) {
+            throw new NonRetryableMessageException("Payment event without eventId / eventType", null);
         }
         PaymentEventMessage.Payload p = message.payload();
         String reason = p == null ? null

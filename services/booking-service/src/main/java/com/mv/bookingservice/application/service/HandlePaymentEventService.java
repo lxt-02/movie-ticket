@@ -151,7 +151,12 @@ public class HandlePaymentEventService implements HandlePaymentEventUseCase {
         log.error("MANUAL CHECK: booking {} payment {}: {}", booking.getId(), paymentId, reason);
     }
 
+    /** After the commit, so a rolled-back state change never gives the seats away. */
     private void releaseHoldQuietly(Booking booking) {
+        AfterCommit.run(() -> releaseHoldNow(booking));
+    }
+
+    private void releaseHoldNow(Booking booking) {
         if (booking.getHoldId() == null) {
             return;
         }

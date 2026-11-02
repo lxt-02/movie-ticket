@@ -91,12 +91,15 @@ public class SeatConfirmation {
 
     private Outcome fail(Booking booking, String reason) {
         booking.failAfterPayment();
-        try {
-            // After a timeout the hold may still be alive: give the seats back. Best effort only.
-            showtimeClientPort.releaseHold(booking.getHoldId());
-        } catch (RuntimeException e) {
-            log.warn("Could not release hold {} of booking {}: {}", booking.getHoldId(), booking.getId(), e.getMessage());
-        }
+        // After a timeout the hold may still be alive: give the seats back once CANCELLED is committed.
+        // Best effort only.
+        AfterCommit.run(() -> {
+            try {
+                showtimeClientPort.releaseHold(booking.getHoldId());
+            } catch (RuntimeException e) {
+                log.warn("Could not release hold {} of booking {}: {}", booking.getHoldId(), booking.getId(), e.getMessage());
+            }
+        });
         log.error("MANUAL CHECK: booking {} paid by {} but CANCELLED, seats not booked. {}",
                 booking.getId(), booking.getPaidPaymentId(), reason);
         return Outcome.FAILED;

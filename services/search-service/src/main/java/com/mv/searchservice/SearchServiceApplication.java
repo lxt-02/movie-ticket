@@ -10,7 +10,7 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
  * movie-service --(outbox)--> Kafka topic movie-events --> search-service --> Elasticsearch index "movies"
  *                                                                       <-- GET /api/v1/search/movies
  * </pre>
- * MySQL in movie-service stays the source of truth; the index is a read model that can be rebuilt any time
+ * PostgreSQL in movie-service stays the source of truth; the index is a read model that can be rebuilt any time
  * (POST /api/v1/movies/search-sync re-sends every movie).
  */
 @SpringBootApplication

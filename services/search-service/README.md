@@ -6,7 +6,7 @@
 Admin tạo / sửa / đổi trạng thái / xoá phim
         │  POST/PUT/PATCH/DELETE /api/v1/movies
         ▼
-movie-service ── cùng 1 transaction ──► MySQL: movies + outbox_events (MOVIE_CREATED ...)
+movie-service ── cùng 1 transaction ──► PostgreSQL: movies + outbox_events (MOVIE_CREATED ...)
         │
         │  MovieOutboxRelay (mỗi 2s, 1 instance nhờ khoá outbox_relay_lock)
         ▼
@@ -20,7 +20,7 @@ search-service: MovieEventListener → MovieIndexer
 Elasticsearch index "movies"  ◄── GET /api/v1/search/movies (qua gateway, không cần đăng nhập)
 ```
 
-- **MySQL là nguồn dữ liệu gốc**, Elasticsearch chỉ là bản đọc (read model), dựng lại được bất cứ lúc nào.
+- **PostgreSQL (movie_db) là nguồn dữ liệu gốc**, Elasticsearch chỉ là bản đọc (read model), dựng lại được bất cứ lúc nào.
 - **Không mất sự kiện khi Kafka sập**: sự kiện nằm trong `outbox_events` cho tới khi gửi được.
 - **Không mất sự kiện khi Elasticsearch sập**: consumer retry 1s, 2s, 4s... (tối đa 5 phút), quá hạn thì đẩy sang `movie-events.DLT`.
 - **Lấp đầy index lần đầu**: movie-service gửi lại toàn bộ phim mỗi khi khởi động (`movie.search.sync-on-startup=true`), hoặc admin gọi `POST /api/v1/movies/search-sync`.

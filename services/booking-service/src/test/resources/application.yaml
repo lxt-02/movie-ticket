@@ -22,3 +22,6 @@ spring:
 booking:
   scheduling:
     enabled: false
+  kafka:
+    # No broker in unit tests.
+    verify-topics: false
