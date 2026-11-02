@@ -22,4 +22,9 @@ public record KafkaTopicsProperties(String paymentCommands, String paymentEvents
             partitions = 3;
         }
     }
+
+    /** Dead-letter topic of payment-commands (commands that still fail after the retries). */
+    public String paymentCommandsDlt() {
+        return paymentCommands + ".DLT";
+    }
 }

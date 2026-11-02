@@ -16,12 +16,11 @@ public interface CinemaJpaRepository extends JpaRepository<CinemaEntity, UUID> {
 
     @Query("""
             SELECT c FROM CinemaEntity c
-            WHERE (:city IS NULL OR LOWER(c.city) = LOWER(:city))
+            WHERE (:city = '' OR LOWER(c.city) = LOWER(:city))
               AND (:status IS NULL OR c.status = :status)
               AND (:status IS NOT NULL OR :includeClosed = TRUE OR c.status <> :closed)
-              AND (:keyword IS NULL
-                   OR LOWER(c.name) LIKE LOWER(CONCAT('%', :keyword, '%'))
-                   OR LOWER(c.address) LIKE LOWER(CONCAT('%', :keyword, '%')))
+              AND (LOWER(c.name) LIKE CONCAT('%', LOWER(:keyword), '%')
+                   OR LOWER(c.address) LIKE CONCAT('%', LOWER(:keyword), '%'))
             """)
     Page<CinemaEntity> search(@Param("city") String city,
                               @Param("status") CinemaStatus status,

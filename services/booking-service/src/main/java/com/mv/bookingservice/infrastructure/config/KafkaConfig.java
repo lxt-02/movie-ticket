@@ -1,6 +1,7 @@
 package com.mv.bookingservice.infrastructure.config;
 
 import com.mv.bookingservice.infrastructure.messaging.BookingKafkaProperties;
+import com.mv.bookingservice.infrastructure.messaging.NonRetryableMessageException;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.common.TopicPartition;
@@ -25,6 +26,7 @@ import org.springframework.util.backoff.ExponentialBackOff;
  *     {@code event-retry-max-elapsed-ms}. Blocking keeps the order of the events of one booking (same partition).</li>
  *     <li>Still failing: the record is published to {@code payment-events.DLT} (nothing is lost, visible in Kafka UI)
  *     and the partition moves on. Replay it later: POST /api/v1/bookings/admin/payment-events-dlt/replay.</li>
+ *     <li>Unreadable records (malformed JSON) are not retried: straight to the DLT.</li>
  *     <li>Safety net: the expiry job asks payment-service before expiring an unpaid booking
  *     (BookingMaintenanceService), so even an event still parked in the DLT cannot cost a paid seat.</li>
  * </ol>
@@ -58,6 +60,8 @@ public class KafkaConfig {
         backOff.setMaxElapsedTime(properties.eventRetryMaxElapsedMs());
 
         DefaultErrorHandler handler = new DefaultErrorHandler(recoverer, backOff);
+        // Unreadable record: retrying cannot fix it -> DLT at once (kept, partition not blocked for 60s).
+        handler.addNotRetryableExceptions(NonRetryableMessageException.class);
         handler.setRetryListeners((record, ex, deliveryAttempt) ->
                 log.warn("PAYMENT EVENT retry {} for {}-{}@{}: {}", deliveryAttempt, record.topic(),
                         record.partition(), record.offset(), ex.getMessage()));

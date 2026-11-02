@@ -24,19 +24,31 @@ public interface ShowtimeJpaRepository extends JpaRepository<ShowtimeEntity, UUI
     @Query("SELECT s FROM ShowtimeEntity s WHERE s.id = :id")
     Optional<ShowtimeEntity> findByIdWithLock(@Param("id") UUID id);
 
+    /** Stands for "no showtime to exclude" (never a real id). */
+    UUID NO_ID = new UUID(0L, 0L);
+
+    /**
+     * {@code excludeId} null = check every showtime. A null UUID is replaced by {@link #NO_ID} instead of
+     * "(:excludeId IS NULL OR ...)", which PostgreSQL rejects ("could not determine data type of parameter").
+     */
+    default boolean existsOverlapping(UUID screenId, Instant from, Instant to, UUID excludeId,
+                                      ShowtimeStatus cancelled) {
+        return existsOverlappingExcluding(screenId, from, to, excludeId != null ? excludeId : NO_ID, cancelled);
+    }
+
     @Query("""
             SELECT CASE WHEN COUNT(s) > 0 THEN true ELSE false END FROM ShowtimeEntity s
             WHERE s.screenId = :screenId
               AND s.status <> :cancelled
-              AND (:excludeId IS NULL OR s.id <> :excludeId)
+              AND s.id <> :excludeId
               AND s.startTime < :to
               AND s.endTime > :from
             """)
-    boolean existsOverlapping(@Param("screenId") UUID screenId,
-                              @Param("from") Instant from,
-                              @Param("to") Instant to,
-                              @Param("excludeId") UUID excludeId,
-                              @Param("cancelled") ShowtimeStatus cancelled);
+    boolean existsOverlappingExcluding(@Param("screenId") UUID screenId,
+                                       @Param("from") Instant from,
+                                       @Param("to") Instant to,
+                                       @Param("excludeId") UUID excludeId,
+                                       @Param("cancelled") ShowtimeStatus cancelled);
 
     /** SCHEDULED -> SELLING once the sales window opens (start - window <= now), for showtimes not started yet. */
     @Modifying
@@ -56,13 +68,19 @@ public interface ShowtimeJpaRepository extends JpaRepository<ShowtimeEntity, UUI
     int endFinished(@Param("now") Instant now, @Param("running") Collection<ShowtimeStatus> running,
                     @Param("ended") ShowtimeStatus ended);
 
+    /**
+     * Null filter = no filter. COALESCE instead of "(:id IS NULL OR ...)": PostgreSQL cannot infer the type of a
+     * null UUID parameter in "? IS NULL" ("could not determine data type of parameter").
+     * Same for a null Instant: from/to are never null here, the adapter replaces a missing bound with
+     * SEARCH_MIN_TIME / SEARCH_MAX_TIME.
+     */
     @Query("""
             SELECT s FROM ShowtimeEntity s
-            WHERE (:movieId IS NULL OR s.movieId = :movieId)
-              AND (:cinemaId IS NULL OR s.cinemaId = :cinemaId)
-              AND (:screenId IS NULL OR s.screenId = :screenId)
-              AND (:from IS NULL OR s.startTime >= :from)
-              AND (:to IS NULL OR s.startTime < :to)
+            WHERE s.movieId = COALESCE(:movieId, s.movieId)
+              AND s.cinemaId = COALESCE(:cinemaId, s.cinemaId)
+              AND s.screenId = COALESCE(:screenId, s.screenId)
+              AND s.startTime >= :from
+              AND s.startTime < :to
               AND s.status IN :statuses
             """)
     Page<ShowtimeEntity> search(@Param("movieId") UUID movieId,

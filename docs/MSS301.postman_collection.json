@@ -1,0 +1,1603 @@
+{
+  "info": {
+    "_postman_id": "06b79b75-35cc-47c8-967e-860427299d8c",
+    "name": "MSS301 - Full flow (trừ thanh toán)",
+    "description": "Chạy theo thứ tự folder 1 → 8. Biến base / kc có sẵn; token và ID được script tự lưu vào biến collection.\nTài khoản demo: admin, staff, customer, blocked (mật khẩu 123456).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Đăng nhập (Keycloak)",
+      "item": [
+        {
+          "name": "Login admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": "{{kc}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "mss301-frontend"
+                },
+                {
+                  "key": "username",
+                  "value": "admin"
+                },
+                {
+                  "key": "password",
+                  "value": "123456"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"adminToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login customer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": "{{kc}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "mss301-frontend"
+                },
+                {
+                  "key": "username",
+                  "value": "customer"
+                },
+                {
+                  "key": "password",
+                  "value": "123456"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"customerToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login staff",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": "{{kc}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "mss301-frontend"
+                },
+                {
+                  "key": "username",
+                  "value": "staff"
+                },
+                {
+                  "key": "password",
+                  "value": "123456"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"staffToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login blocked",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": "{{kc}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "mss301-frontend"
+                },
+                {
+                  "key": "username",
+                  "value": "blocked"
+                },
+                {
+                  "key": "password",
+                  "value": "123456"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"blockedToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Lấy token cho 4 tài khoản demo (mật khẩu 123456). Token sống 30 phút; gặp 401 thì chạy lại folder này."
+    },
+    {
+      "name": "2. Hồ sơ người dùng",
+      "item": [
+        {
+          "name": "Customer - xem / tạo hồ sơ (/users/me)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/users/me",
+            "description": "Gọi ngay sau khi đăng nhập: lần đầu tạo user trong user_db từ token."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"customerId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff - xem / tạo hồ sơ",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staffToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/users/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Customer - cập nhật hồ sơ",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/users/me",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Nguyễn Văn Khách\",\n  \"avatarUrl\": \"https://example.com/avatar/khach.png\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin - danh sách user",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/users?q=demo&page=0&size=20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Duyệt & tìm kiếm (không cần token)",
+      "item": [
+        {
+          "name": "Phim đang chiếu",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/movies?status=NOW_SHOWING&page=0&size=20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Chi tiết phim Avatar (mẫu)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/movies/20000000-0000-0000-0000-000000000001"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Thể loại",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/movies/genres"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Người (đạo diễn / diễn viên)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/movies/persons?q=Trấn&page=0&size=20"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search - từ khoá",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/search/movies?q=lat mat&page=0&size=12"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search - người + thể loại + độ tuổi",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/search/movies?person=Zendaya&genres=Action&ageRating=T16&sort=newest&page=0&size=12",
+            "description": "sort: relevance | newest | oldest | title | duration_asc | duration_desc"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rạp ở HCM",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/cinemas?city=Ho Chi Minh City"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Phòng của rạp Landmark 81",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/cinemas/30000000-0000-0000-0000-000000000001/screens"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sơ đồ ghế phòng Screen 1",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/screens/32000000-0000-0000-0000-000000000001/layout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Loại phòng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/screen-types"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Loại ghế",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/seat-types"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Suất chiếu Avatar đang bán",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/showtimes?movieId=20000000-0000-0000-0000-000000000001&status=SELLING"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ghế của suất mẫu",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/showtimes/50000000-0000-0000-0000-000000000001/seats",
+            "description": "A1, A2 đang bị booking mẫu giữ; A3, A4, B1-B3 trống; B4 hỏng."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Admin tạo dữ liệu (tuỳ chọn)",
+      "item": [
+        {
+          "name": "Tạo thể loại",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/movies/genres",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Thriller {{runTag}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"runTag\", Date.now().toString().slice(-6));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"genreId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tạo đạo diễn",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/movies/persons",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Victor Vũ\",\n  \"biography\": \"Đạo diễn phim Việt Nam.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"personId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tạo phim (NOW_SHOWING)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/movies",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Thám Tử Kiên {{runTag}}\",\n  \"originalTitle\": \"Thám Tử Kiên: Kỳ Án Không Đầu\",\n  \"description\": \"Phim trinh thám kinh dị lấy bối cảnh làng quê Việt Nam.\",\n  \"durationMinutes\": 131,\n  \"releaseDate\": \"2026-10-20\",\n  \"ageRating\": \"T16\",\n  \"language\": \"Vietnamese\",\n  \"country\": \"Vietnam\",\n  \"posterUrl\": \"https://example.com/posters/tham-tu-kien.jpg\",\n  \"status\": \"NOW_SHOWING\",\n  \"genreIds\": [\n    \"{{genreId}}\",\n    \"21000000-0000-0000-0000-000000000005\"\n  ],\n  \"crew\": [\n    {\n      \"personId\": \"{{personId}}\",\n      \"role\": \"DIRECTOR\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"movieId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search thấy phim mới (đợi vài giây)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/search/movies?q=tham tu kien"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Đồng bộ lại toàn bộ phim sang search",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/movies/search-sync"
+          }
+        },
+        {
+          "name": "Tạo rạp",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/cinemas",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"MV Cinema Thủ Đức {{runTag}}\",\n  \"brand\": \"MV Cinema\",\n  \"address\": \"216 Võ Văn Ngân, Bình Thọ\",\n  \"city\": \"Ho Chi Minh City\",\n  \"district\": \"Thu Duc\",\n  \"phone\": \"028-3000-0003\",\n  \"status\": \"ACTIVE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"cinemaId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tạo phòng + sơ đồ ghế (A, B thường; C VIP)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/cinemas/{{cinemaId}}/screens",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Phòng 1\",\n  \"screenTypeId\": \"31000000-0000-0000-0000-000000000001\",\n  \"rows\": [\n    {\n      \"rowLabel\": \"A\",\n      \"seatCount\": 8,\n      \"seatTypeId\": \"33000000-0000-0000-0000-000000000001\"\n    },\n    {\n      \"rowLabel\": \"B\",\n      \"seatCount\": 8,\n      \"seatTypeId\": \"33000000-0000-0000-0000-000000000001\"\n    },\n    {\n      \"rowLabel\": \"C\",\n      \"seatCount\": 6,\n      \"seatTypeId\": \"33000000-0000-0000-0000-000000000002\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"screenId\", pm.response.json().data.screen.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tạo suất chiếu ngày mai 19:00 (VN)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/showtimes",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"movieId\": \"{{movieId}}\",\n  \"cinemaId\": \"{{cinemaId}}\",\n  \"screenId\": \"{{screenId}}\",\n  \"startTime\": \"{{showtimeStart}}\",\n  \"basePrice\": 90000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Suất mới là SCHEDULED; job mỗi 60s chuyển sang SELLING (≤ 7 ngày trước giờ chiếu). Đợi ~1 phút."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = new Date(Date.now() + 24*3600*1000); d.setUTCHours(12,0,0,0);",
+                  "pm.collectionVariables.set(\"showtimeStart\", d.toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"newShowtimeId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kiểm tra suất mới đã SELLING",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/showtimes/{{newShowtimeId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"SELLING\", () => pm.expect(pm.response.json().data.status).to.eql(\"SELLING\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dùng suất mới cho bước đặt vé (lấy ghế)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/showtimes/{{newShowtimeId}}/seats",
+            "description": "Chạy request này nếu muốn folder 5 đặt vé trên suất vừa tạo thay vì suất mẫu."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"showtimeId\", pm.collectionVariables.get(\"newShowtimeId\"));",
+                  "",
+                  "const free = pm.response.json().data.filter(s => s.status === \"AVAILABLE\");",
+                  "pm.test(\"Có ít nhất 2 ghế trống\", () => pm.expect(free.length).to.be.at.least(2));",
+                  "pm.collectionVariables.set(\"seat1\", free[0].showtimeSeatId);",
+                  "pm.collectionVariables.set(\"seat2\", free[1].showtimeSeatId);",
+                  "if (free[2]) pm.collectionVariables.set(\"seat3\", free[2].showtimeSeatId);"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Bỏ qua folder này nếu chỉ test đặt vé bằng dữ liệu mẫu."
+    },
+    {
+      "name": "5. Đặt vé (customer)",
+      "item": [
+        {
+          "name": "Chọn suất mẫu + lấy 2 ghế trống",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/showtimes/50000000-0000-0000-0000-000000000001/seats",
+            "description": "Bỏ qua request này nếu đã chạy request cuối của folder 4 (đặt trên suất mới)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"showtimeId\", \"50000000-0000-0000-0000-000000000001\");",
+                  "",
+                  "const free = pm.response.json().data.filter(s => s.status === \"AVAILABLE\");",
+                  "pm.test(\"Có ít nhất 2 ghế trống\", () => pm.expect(free.length).to.be.at.least(2));",
+                  "pm.collectionVariables.set(\"seat1\", free[0].showtimeSeatId);",
+                  "pm.collectionVariables.set(\"seat2\", free[1].showtimeSeatId);",
+                  "if (free[2]) pm.collectionVariables.set(\"seat3\", free[2].showtimeSeatId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tạo booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"showtimeId\": \"{{showtimeId}}\",\n  \"seats\": [\n    {\n      \"showtimeSeatId\": \"{{seat1}}\"\n    },\n    {\n      \"showtimeSeatId\": \"{{seat2}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"idemKey\", pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json().data;",
+                  "pm.collectionVariables.set(\"bookingId\", b.id);",
+                  "pm.collectionVariables.set(\"bookingCode\", b.bookingCode);",
+                  "pm.test(\"PENDING\", () => pm.expect(b.status).to.eql(\"PENDING\"));",
+                  "pm.collectionVariables.set(\"bookingKey\", pm.collectionVariables.get(\"idemKey\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gửi lại cùng Idempotency-Key → cùng booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"showtimeId\": \"{{showtimeId}}\",\n  \"seats\": [\n    {\n      \"showtimeSeatId\": \"{{seat1}}\"\n    },\n    {\n      \"showtimeSeatId\": \"{{seat2}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"Cùng bookingId\", () => pm.expect(pm.response.json().data.id).to.eql(pm.collectionVariables.get(\"bookingId\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ghế đã chuyển HELD",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/showtimes/{{showtimeId}}/seats"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const s = pm.response.json().data.find(x => x.showtimeSeatId === pm.collectionVariables.get(\"seat1\"));",
+                  "pm.test(\"seat1 HELD\", () => pm.expect(s.status).to.eql(\"HELD\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Xem booking theo id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings/{{bookingId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Xem booking theo mã",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings/code/{{bookingCode}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Danh sách booking của tôi",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6. Trường hợp lỗi (chạy khi booking ở folder 5 còn PENDING)",
+      "item": [
+        {
+          "name": "6.1 Đặt vé không có token → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"showtimeId\": \"{{showtimeId}}\",\n  \"seats\": [\n    {\n      \"showtimeSeatId\": \"{{seat1}}\"\n    },\n    {\n      \"showtimeSeatId\": \"{{seat2}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"idemKey\", pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.2 Customer tạo phim → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/movies",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Không được tạo\",\n  \"durationMinutes\": 90,\n  \"status\": \"NOW_SHOWING\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.3 Thiếu Idempotency-Key → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"showtimeId\": \"{{showtimeId}}\",\n  \"seats\": [\n    {\n      \"showtimeSeatId\": \"{{seat1}}\"\n    },\n    {\n      \"showtimeSeatId\": \"{{seat2}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.4 Cùng key, khác ghế → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{bookingKey}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"showtimeId\": \"{{showtimeId}}\",\n  \"seats\": [\n    {\n      \"showtimeSeatId\": \"{{seat1}}\"\n    },\n    {\n      \"showtimeSeatId\": \"{{seat3}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.5 Staff đặt ghế customer đang giữ → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staffToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"showtimeId\": \"{{showtimeId}}\",\n  \"seats\": [\n    {\n      \"showtimeSeatId\": \"{{seat1}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"idemKey\", pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.6 Tài khoản bị khoá đặt vé → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{blockedToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"showtimeId\": \"{{showtimeId}}\",\n  \"seats\": [\n    {\n      \"showtimeSeatId\": \"{{seat3}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"idemKey\", pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.7 Staff xem booking của customer → 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staffToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings/{{bookingId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.9 Đặt ghế hỏng B4 của suất mẫu → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"showtimeId\": \"50000000-0000-0000-0000-000000000001\",\n  \"seats\": [\n    {\n      \"showtimeSeatId\": \"51000000-0000-0000-0000-000000000008\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"idemKey\", pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Chạy sau folder 5 (booking còn PENDING, chưa huỷ)."
+    },
+    {
+      "name": "7. Huỷ booking",
+      "item": [
+        {
+          "name": "Huỷ booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings/{{bookingId}}/cancel",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Đổi lịch\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"CANCELLED\", () => pm.expect(pm.response.json().data.status).to.eql(\"CANCELLED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ghế về AVAILABLE",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/showtimes/{{showtimeId}}/seats"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const s = pm.response.json().data.find(x => x.showtimeSeatId === pm.collectionVariables.get(\"seat1\"));",
+                  "pm.test(\"seat1 AVAILABLE\", () => pm.expect(s.status).to.eql(\"AVAILABLE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.8 Huỷ lần 2 → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings/{{bookingId}}/cancel",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Huỷ lại\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Booking không huỷ sẽ tự EXPIRED sau ~9 phút (không thanh toán)."
+    },
+    {
+      "name": "8. Admin - Kafka / DLT (tuỳ chọn)",
+      "item": [
+        {
+          "name": "Trạng thái DLT replay",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings/admin/payment-events-dlt"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Xem message: Kafka UI http://localhost:8090 (topic payment-commands). Trace: Zipkin http://localhost:9411."
+    }
+  ],
+  "variable": [
+    {
+      "key": "base",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "kc",
+      "value": "http://localhost:8180/realms/mss301/protocol/openid-connect/token"
+    }
+  ]
+}

@@ -46,7 +46,10 @@ public class MovieRepositoryAdapter implements MovieRepository, LoadMoviePort, S
 
     @Override
     public PageResult<Movie> search(MovieStatus status, String keyword, boolean includeArchived, int page, int size) {
-        Page<MovieEntity> result = movieJpaRepository.search(status, keyword, includeArchived, MovieStatus.ARCHIVED,
+        // Never pass a null String: PostgreSQL types it as bytea ("function lower(bytea) does not exist").
+        // "" matches every title.
+        String kw = keyword == null ? "" : keyword.trim();
+        Page<MovieEntity> result = movieJpaRepository.search(status, kw, includeArchived, MovieStatus.ARCHIVED,
                 PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "releaseDate").and(Sort.by("title"))));
         return new PageResult<>(toDomain(result.getContent()), page, size, result.getTotalElements());
     }

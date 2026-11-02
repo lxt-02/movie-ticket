@@ -61,7 +61,9 @@ public class CatalogueRepositoryAdapter implements CataloguePort {
 
     @Override
     public PageResult<Person> searchPersons(String keyword, int page, int size) {
-        Page<PersonEntity> result = personJpaRepository.search(keyword, PageRequest.of(page, size, Sort.by("name")));
+        // Never pass a null String (PostgreSQL types it as bytea); "" matches every name.
+        String kw = keyword == null ? "" : keyword.trim();
+        Page<PersonEntity> result = personJpaRepository.search(kw, PageRequest.of(page, size, Sort.by("name")));
         return new PageResult<>(result.getContent().stream().map(mapper::toDomain).toList(),
                 page, size, result.getTotalElements());
     }

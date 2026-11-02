@@ -10,7 +10,8 @@ import java.util.UUID;
 @Repository
 public interface UserJpaRepository extends JpaRepository<UserEntity, UUID> {
 
-    Optional<UserEntity> findByEmail(String email);
+    /** Case-insensitive like the old MySQL collation (PostgreSQL compares text case-sensitively). */
+    Optional<UserEntity> findByEmailIgnoreCase(String email);
 
     @org.springframework.data.jpa.repository.Query("""
             SELECT u FROM UserEntity u
