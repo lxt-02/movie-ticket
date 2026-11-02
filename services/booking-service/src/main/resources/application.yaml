@@ -14,7 +14,7 @@ spring:
     url: ${SPRING_DATASOURCE_URL}
     username: ${SPRING_DATASOURCE_USERNAME}
     password: ${SPRING_DATASOURCE_PASSWORD}
-    driver-class-name: com.mysql.cj.jdbc.Driver
+    driver-class-name: org.postgresql.Driver
 
   jpa:
     hibernate:
@@ -23,9 +23,6 @@ spring:
     properties:
       hibernate:
         format_sql: true
-        dialect: org.hibernate.dialect.MySQLDialect
-        type:
-          preferred_uuid_jdbc_type: CHAR
 
   cloud:
     openfeign:
@@ -61,6 +58,12 @@ spring:
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
       properties:
         enable.idempotence: true
+        # Broker down / topic missing: send() gives up after 5s (Kafka default 60s held the relay transaction).
+        max.block.ms: 5000
+        request.timeout.ms: 4000
+        # The producer stops retrying after 8s, before the relay stops waiting (publish-timeout-ms 15s):
+        # no hidden late send after the relay already scheduled a retry (duplicate command).
+        delivery.timeout.ms: 8000
     consumer:
       group-id: booking-service
       auto-offset-reset: earliest
@@ -111,7 +114,16 @@ booking:
     relay-delay-ms: 2000
     relay-initial-delay-ms: 3000
     relay-batch-size: 50
-    publish-timeout-ms: 5000
+    # > max.block.ms (5s) + delivery.timeout.ms (8s), see spring.kafka.producer.properties
+    publish-timeout-ms: 15000
+    # Temporary publish error (broker down, topic missing): row stays PENDING, retried after 2s, 4s ... max 60s.
+    # Permanent error (no permission, record too large): row FAILED, other bookings continue.
+    # GET /api/v1/bookings/admin/outbox, POST /api/v1/bookings/admin/outbox/requeue-failed
+    relay-retry-initial-delay-ms: 2000
+    relay-retry-max-delay-ms: 60000
+    relay-alert-after-attempts: 10
+    # Startup check that payment-commands / payment-events exist (wrong name = ERROR in the log).
+    verify-topics: true
     # A payment event that fails for a technical reason is retried (1s, 2s, 4s ... max 10s) for 60s,
     # then parked in payment-events.DLT instead of being skipped. Replay: POST /api/v1/bookings/admin/payment-events-dlt/replay
     event-retry-max-interval-ms: 10000

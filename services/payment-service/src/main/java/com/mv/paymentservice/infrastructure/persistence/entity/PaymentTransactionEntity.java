@@ -55,7 +55,7 @@ public class PaymentTransactionEntity {
     private BigDecimal amount;
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "raw_response", columnDefinition = "json")
+    @Column(name = "raw_response")
     private String rawResponse;
 
     @Column(name = "created_at", nullable = false, updatable = false)

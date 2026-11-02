@@ -53,10 +53,17 @@ public class ShowtimeRepositoryAdapter implements ShowtimeRepository, ShowtimeRe
                 java.util.List.of(ShowtimeStatus.SCHEDULED, ShowtimeStatus.SELLING), ShowtimeStatus.ENDED);
     }
 
+    private static final Instant SEARCH_MIN_TIME = Instant.parse("1970-01-01T00:00:00Z");
+    private static final Instant SEARCH_MAX_TIME = Instant.parse("9999-12-31T00:00:00Z");
+
     @Override
     public PageResult<Showtime> search(UUID movieId, UUID cinemaId, UUID screenId, Instant from, Instant to,
                                        Collection<ShowtimeStatus> statuses, int page, int size) {
-        Page<ShowtimeEntity> result = showtimeJpaRepository.search(movieId, cinemaId, screenId, from, to, statuses,
+        // Null bound = no bound. Never pass a null Instant: PostgreSQL cannot type it ("parameter $n").
+        Instant effectiveFrom = from != null ? from : SEARCH_MIN_TIME;
+        Instant effectiveTo = to != null ? to : SEARCH_MAX_TIME;
+        Page<ShowtimeEntity> result = showtimeJpaRepository.search(movieId, cinemaId, screenId,
+                effectiveFrom, effectiveTo, statuses,
                 PageRequest.of(page, size, Sort.by("startTime")));
         return new PageResult<>(result.getContent().stream().map(mapper::toDomain).toList(),
                 page, size, result.getTotalElements());

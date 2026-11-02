@@ -37,6 +37,7 @@ public class SecurityConfig {
                         .requestMatchers("/error", "/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/payments/payos/webhook").permitAll()
                         .requestMatchers("/internal/**").permitAll()
+                        .requestMatchers("/api/v1/payments/admin/**").hasAnyRole("ADMIN", "STAFF")
                         .anyRequest().authenticated())
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint(JsonSecurityErrors::unauthorized)

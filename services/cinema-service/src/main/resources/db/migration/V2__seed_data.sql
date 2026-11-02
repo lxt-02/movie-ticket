@@ -1,3 +1,5 @@
+-- Demo cinemas, screens and seats. Ids are referenced by showtime-service seed data.
+
 INSERT INTO cinemas (
     id,
     name,

@@ -159,6 +159,40 @@ class HoldSeatsServiceTest {
     }
 
     @Test
+    void shouldRejectIdempotentRetryWhenPreviousHoldWasReleased() {
+        UUID showtimeId = UUID.randomUUID();
+        SeatHold releasedHold = SeatHold.builder()
+                .id(UUID.randomUUID())
+                .bookingId(UUID.randomUUID())
+                .showtimeId(showtimeId)
+                .idempotencyKey("key-1")
+                .requestHash("hash-1")
+                .status(SeatHoldStatus.RELEASED)
+                .expiresAt(Instant.now().plusSeconds(600))
+                .build();
+        HoldSeatsCommand command = HoldSeatsCommand.builder()
+                .showtimeId(showtimeId)
+                .bookingId(releasedHold.getBookingId())
+                .showtimeSeatIds(List.of(UUID.randomUUID()))
+                .idempotencyKey("key-1")
+                .requestHash("hash-1")
+                .holdDurationSeconds(600)
+                .build();
+        Showtime showtime = Showtime.builder()
+                .id(showtimeId)
+                .startTime(Instant.now().plusSeconds(3600))
+                .status(ShowtimeStatus.SELLING)
+                .build();
+
+        when(showtimeRepositoryPort.findByIdWithLock(showtimeId)).thenReturn(Optional.of(showtime));
+        when(loadSeatHoldPort.findByBookingId(releasedHold.getBookingId())).thenReturn(Optional.of(releasedHold));
+
+        assertThrows(SeatHoldConflictException.class, () -> holdSeatsService.execute(command));
+
+        verify(saveSeatHoldPort, never()).save(any());
+    }
+
+    @Test
     void shouldRejectSameBookingIdWithDifferentRequestHash() {
         SeatHold existingHold = SeatHold.builder()
                 .id(UUID.randomUUID())

@@ -15,7 +15,7 @@ public interface PersonJpaRepository extends JpaRepository<PersonEntity, UUID> {
 
     @Query("""
             SELECT p FROM PersonEntity p
-            WHERE :keyword IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+            WHERE LOWER(p.name) LIKE CONCAT('%', LOWER(:keyword), '%')
             """)
     Page<PersonEntity> search(@Param("keyword") String keyword, Pageable pageable);
 }

@@ -14,17 +14,20 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 /**
  * Publishes outbox_messages to Kafka.
  * <ol>
  *     <li>Claim a batch (FOR UPDATE SKIP LOCKED) and mark it PROCESSING with a deadline, then commit.</li>
  *     <li>Send each message and wait for the broker ack.</li>
- *     <li>Mark PUBLISHED, or back to PENDING with a retry delay, or FAILED after max attempts.</li>
+ *     <li>Mark PUBLISHED; or, on a <b>temporary</b> error (broker down, topic missing, timeout), back to PENDING with
+ *     an exponential back-off (retry-delay-ms x 2^n, max max-retry-delay-ms) and the rest of the batch is released
+ *     at once (it would hit the same broker problem); or, on a <b>permanent</b> error (no permission, record too
+ *     large), FAILED. See {@link KafkaPublishErrors}.</li>
  * </ol>
+ * A temporary error never makes a message FAILED: PAYMENT_SUCCEEDED must survive a long broker outage. FAILED rows
+ * wait for an operator: POST /api/v1/payments/admin/outbox/requeue-failed.
  * Messages stuck in PROCESSING past the deadline (instance crashed) are claimed again. Delivery is at-least-once;
  * consumers dedupe by eventId.
  */
@@ -61,40 +64,57 @@ public class OutboxRelay {
         if (batch == null || batch.isEmpty()) {
             return;
         }
-        for (OutboxMessageEntity message : batch) {
-            publish(message);
+        for (int i = 0; i < batch.size(); i++) {
+            Instant retryAt = publish(batch.get(i));
+            if (retryAt != null) {
+                release(batch.subList(i + 1, batch.size()), retryAt);
+                return;
+            }
         }
     }
 
     private List<OutboxMessageEntity> claimBatch() {
         Instant now = clock.instant();
-        List<OutboxMessageEntity> claimed = repository.findClaimableForUpdate(
-                properties.maxAttempts(), now, properties.batchSize());
+        List<OutboxMessageEntity> claimed = repository.findClaimableForUpdate(now, properties.batchSize());
         Instant deadline = now.plus(Duration.ofMillis(properties.stalePublishingTimeoutMs()));
         for (OutboxMessageEntity message : claimed) {
             message.setStatus(OutboxStatus.PROCESSING);
             message.setRetryCount(message.getRetryCount() + 1);
             message.setNextRetryAt(deadline);
-            message.setLastError(null);
         }
         return repository.saveAll(claimed);
     }
 
-    private void publish(OutboxMessageEntity message) {
+    /** Returns null when done (published or FAILED), or the retry time after a temporary error. */
+    private Instant publish(OutboxMessageEntity message) {
         try {
             kafkaTemplate.send(message.getTopic(), message.getMessageKey(), message.getPayload())
                     .get(properties.publishTimeoutMs(), TimeUnit.MILLISECONDS);
             log.info("Kafka SEND topic={} key={} type={} body={}",
                     message.getTopic(), message.getMessageKey(), message.getEventType(), message.getPayload());
             transactionTemplate.executeWithoutResult(status -> markPublished(message.getId()));
+            return null;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            transactionTemplate.executeWithoutResult(status -> markFailedAttempt(message.getId(), e));
-        } catch (ExecutionException | TimeoutException | RuntimeException e) {
-            Throwable cause = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
-            log.warn("Outbox publish failed for {} ({}): {}", message.getId(), message.getEventType(), cause.getMessage());
-            transactionTemplate.executeWithoutResult(status -> markFailedAttempt(message.getId(), cause));
+            Instant retryAt = clock.instant();
+            transactionTemplate.executeWithoutResult(status -> markForRetry(message.getId(), e, retryAt));
+            return retryAt;
+        } catch (Exception e) {
+            Throwable cause = KafkaPublishErrors.rootCause(e);
+            if (KafkaPublishErrors.isPermanent(cause)) {
+                transactionTemplate.executeWithoutResult(status -> markFailed(message.getId(), cause));
+                return null;
+            }
+            Instant retryAt = clock.instant().plus(backOff(message.getRetryCount()));
+            transactionTemplate.executeWithoutResult(status -> markForRetry(message.getId(), cause, retryAt));
+            return retryAt;
         }
+    }
+
+    /** retry-delay-ms, x2 per attempt, capped. */
+    Duration backOff(int attempts) {
+        long delay = properties.retryDelayMs() << Math.min(Math.max(attempts - 1, 0), 20);
+        return Duration.ofMillis(Math.min(delay, properties.maxRetryDelayMs()));
     }
 
     private void markPublished(UUID id) {
@@ -107,22 +127,49 @@ public class OutboxRelay {
         });
     }
 
-    private void markFailedAttempt(UUID id, Throwable error) {
+    private void markForRetry(UUID id, Throwable error, Instant retryAt) {
         repository.findById(id).ifPresent(message -> {
-            boolean exhausted = message.getRetryCount() >= properties.maxAttempts();
-            message.setStatus(exhausted ? OutboxStatus.FAILED : OutboxStatus.PENDING);
-            message.setNextRetryAt(exhausted ? null
-                    : clock.instant().plus(Duration.ofMillis(properties.retryDelayMs())));
-            message.setLastError(truncate(error.getClass().getSimpleName() + ": " + error.getMessage()));
+            message.setStatus(OutboxStatus.PENDING);
+            message.setNextRetryAt(retryAt);
+            message.setLastError(KafkaPublishErrors.describe(error, MAX_ERROR_LENGTH));
             repository.save(message);
-            if (exhausted) {
-                log.error("Outbox message {} ({}) FAILED after {} attempts",
-                        message.getId(), message.getEventType(), message.getRetryCount());
+            if (message.getRetryCount() >= properties.maxAttempts()) {
+                log.error("OUTBOX still cannot publish {} ({}) after {} attempts, next try at {}: {}",
+                        message.getId(), message.getEventType(), message.getRetryCount(), retryAt,
+                        message.getLastError());
+            } else {
+                log.warn("OUTBOX temporary publish error for {} ({}), attempt {}, next try at {}: {}",
+                        message.getId(), message.getEventType(), message.getRetryCount(), retryAt,
+                        message.getLastError());
             }
         });
     }
 
-    private static String truncate(String value) {
-        return value.length() > MAX_ERROR_LENGTH ? value.substring(0, MAX_ERROR_LENGTH) : value;
+    private void markFailed(UUID id, Throwable error) {
+        repository.findById(id).ifPresent(message -> {
+            message.setStatus(OutboxStatus.FAILED);
+            message.setNextRetryAt(null);
+            message.setLastError(KafkaPublishErrors.describe(error, MAX_ERROR_LENGTH));
+            repository.save(message);
+            log.error("OUTBOX FAILED {} ({}) for booking {}: {}. Fix the cause, then "
+                            + "POST /api/v1/payments/admin/outbox/requeue-failed",
+                    message.getId(), message.getEventType(), message.getAggregateId(), message.getLastError());
+        });
+    }
+
+    /** Not attempted in this run (broker problem): back to PENDING, this claim does not count as an attempt. */
+    private void release(List<OutboxMessageEntity> notAttempted, Instant retryAt) {
+        if (notAttempted.isEmpty()) {
+            return;
+        }
+        transactionTemplate.executeWithoutResult(status -> notAttempted.forEach(claimed ->
+                repository.findById(claimed.getId()).ifPresent(message -> {
+                    message.setStatus(OutboxStatus.PENDING);
+                    message.setRetryCount(Math.max(0, message.getRetryCount() - 1));
+                    message.setNextRetryAt(retryAt);
+                    repository.save(message);
+                })));
+        log.warn("OUTBOX broker problem: {} other message(s) of this batch released until {}", notAttempted.size(),
+                retryAt);
     }
 }

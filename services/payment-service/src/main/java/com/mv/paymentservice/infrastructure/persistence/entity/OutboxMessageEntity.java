@@ -45,7 +45,7 @@ public class OutboxMessageEntity {
     private String messageKey;
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "payload", nullable = false, columnDefinition = "json")
+    @Column(name = "payload", nullable = false)
     private String payload;
 
     @Enumerated(EnumType.STRING)

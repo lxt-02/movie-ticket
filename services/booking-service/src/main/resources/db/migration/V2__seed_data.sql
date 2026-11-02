@@ -1,3 +1,5 @@
+-- Demo booking (PENDING, hold 70000000-...-0001 in showtime-service). Times are UTC.
+
 INSERT INTO bookings (
     id,
     booking_code,
@@ -25,12 +27,12 @@ INSERT INTO bookings (
         'Avatar: The Way of Water',
         'MV Cinema Landmark 81',
         'Screen 1',
-        '2030-01-15 19:00:00.000000',
+        '2030-01-15 19:00:00+00',
         200000.00,
         0.00,
         200000.00,
         'PENDING',
-        '2030-01-15 18:45:00.000000',
+        '2030-01-15 18:45:00+00',
         '70000000-0000-0000-0000-000000000001',
         'seed-booking-001',
         'seed-hash-booking-001',
