@@ -46,6 +46,7 @@ import java.util.UUID;
  * Screens and seat layouts. GET is public; writes need X-User-Role: ADMIN.
  * Layout input is a list of rows: [{ "rowLabel": "A", "seatCount": 12, "seatTypeId": "..." }, ...].
  */
+
 @RestController
 @RequestMapping("/api/v1")
 @RequiredArgsConstructor

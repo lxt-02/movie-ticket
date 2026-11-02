@@ -33,7 +33,11 @@ public class CinemaRepositoryAdapter implements CinemaRepository, LoadCinemaPort
     @Override
     public PageResult<Cinema> search(String city, CinemaStatus status, String keyword, boolean includeClosed,
                                      int page, int size) {
-        Page<CinemaEntity> result = cinemaJpaRepository.search(city, status, keyword, includeClosed,
+        // Never pass a null String: PostgreSQL types it as bytea ("function lower(bytea) does not exist").
+        // city "" = any city, keyword "" = matches every cinema.
+        String cityFilter = city == null ? "" : city.trim();
+        String kw = keyword == null ? "" : keyword.trim();
+        Page<CinemaEntity> result = cinemaJpaRepository.search(cityFilter, status, kw, includeClosed,
                 CinemaStatus.CLOSED, PageRequest.of(page, size, Sort.by("city").and(Sort.by("name"))));
         return new PageResult<>(result.getContent().stream().map(mapper::toDomain).toList(),
                 page, size, result.getTotalElements());

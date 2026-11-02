@@ -18,9 +18,8 @@ public interface MovieJpaRepository extends JpaRepository<MovieEntity, UUID> {
             SELECT m FROM MovieEntity m
             WHERE (:status IS NULL OR m.status = :status)
               AND (:status IS NOT NULL OR :includeArchived = TRUE OR m.status <> :archived)
-              AND (:keyword IS NULL
-                   OR LOWER(m.title) LIKE LOWER(CONCAT('%', :keyword, '%'))
-                   OR LOWER(m.originalTitle) LIKE LOWER(CONCAT('%', :keyword, '%')))
+              AND (LOWER(m.title) LIKE CONCAT('%', LOWER(:keyword), '%')
+                   OR LOWER(m.originalTitle) LIKE CONCAT('%', LOWER(:keyword), '%'))
             """)
     Page<MovieEntity> search(@Param("status") MovieStatus status,
                              @Param("keyword") String keyword,

@@ -11,3 +11,5 @@ infras/keycloak/
 infras/observability/
 **/node_modules/
 _claude_src.tgz
+_to_delete/
+*.tgz

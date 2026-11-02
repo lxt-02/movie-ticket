@@ -47,7 +47,7 @@ public class HoldSeatsService implements HoldSeatsUseCase {
 
         // 1. Lock showtime row first. This serializes concurrent requests for the same bookingId
         //    and, being the first statement, makes the idempotency read below see committed holds
-        //    (MySQL REPEATABLE READ takes its snapshot on the first non-locking read).
+        //    (PostgreSQL READ COMMITTED: each statement after the lock sees every committed hold).
         Showtime showtime = showtimeRepositoryPort.findByIdWithLock(command.getShowtimeId())
                 .orElseThrow(() -> new ShowtimeNotFoundException(command.getShowtimeId()));
 
@@ -136,6 +136,15 @@ public class HoldSeatsService implements HoldSeatsUseCase {
         if (command.getRequestHash() == null || !command.getRequestHash().equals(existingHold.getRequestHash())) {
             throw new SeatHoldConflictException(
                     "Booking " + command.getBookingId() + " đã giữ ghế với yêu cầu khác");
+        }
+        // A hold that already ended (released after a failed booking attempt, or expired) must not be handed back:
+        // booking-service would create a booking on seats it no longer owns, and the buyer would pay for nothing.
+        boolean ended = existingHold.getStatus() == SeatHoldStatus.RELEASED
+                || existingHold.getStatus() == SeatHoldStatus.EXPIRED
+                || (existingHold.getStatus() == SeatHoldStatus.HELD && existingHold.isExpired());
+        if (ended) {
+            throw new SeatHoldConflictException("Lượt giữ ghế trước của yêu cầu này đã kết thúc ("
+                    + existingHold.getStatus() + "), vui lòng chọn ghế và đặt lại");
         }
 
         Showtime showtime = showtimeRepositoryPort.findById(existingHold.getShowtimeId())

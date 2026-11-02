@@ -20,11 +20,22 @@ public interface ScreenJpaRepository extends JpaRepository<ScreenEntity, UUID> {
     @EntityGraph(attributePaths = {"cinema", "screenType"})
     List<ScreenEntity> findByCinemaId(UUID cinemaId);
 
+    /** Stands for "no screen to exclude" (never a real id). */
+    UUID NO_ID = new UUID(0L, 0L);
+
+    /**
+     * {@code excludeId} null = check every screen. A null UUID is replaced by {@link #NO_ID} instead of
+     * "(:excludeId IS NULL OR ...)", which PostgreSQL rejects ("could not determine data type of parameter").
+     */
+    default boolean existsByName(UUID cinemaId, String name, UUID excludeId) {
+        return existsByNameExcluding(cinemaId, name, excludeId != null ? excludeId : NO_ID);
+    }
+
     @Query("""
             SELECT CASE WHEN COUNT(s) > 0 THEN true ELSE false END FROM ScreenEntity s
             WHERE s.cinema.id = :cinemaId AND LOWER(s.name) = LOWER(:name)
-              AND (:excludeId IS NULL OR s.id <> :excludeId)
+              AND s.id <> :excludeId
             """)
-    boolean existsByName(@Param("cinemaId") UUID cinemaId, @Param("name") String name,
-                         @Param("excludeId") UUID excludeId);
+    boolean existsByNameExcluding(@Param("cinemaId") UUID cinemaId, @Param("name") String name,
+                                  @Param("excludeId") UUID excludeId);
 }

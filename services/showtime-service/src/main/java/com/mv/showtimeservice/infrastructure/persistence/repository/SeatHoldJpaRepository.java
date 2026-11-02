@@ -25,7 +25,12 @@ public interface SeatHoldJpaRepository extends JpaRepository<SeatHoldEntity, UUI
     @Query("SELECT h.showtimeId FROM SeatHoldEntity h WHERE h.id = :id")
     Optional<UUID> findShowtimeIdById(@Param("id") UUID id);
 
+    /**
+     * Locks only the hold row ({@code SELECT ... FOR UPDATE}); its items load lazily in the same transaction.
+     * No DISTINCT / LEFT JOIN FETCH here: PostgreSQL refuses FOR UPDATE with DISTINCT and on the nullable side
+     * of an outer join.
+     */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT DISTINCT h FROM SeatHoldEntity h LEFT JOIN FETCH h.items WHERE h.id = :id")
+    @Query("SELECT h FROM SeatHoldEntity h WHERE h.id = :id")
     Optional<SeatHoldEntity> findByIdForUpdate(@Param("id") UUID id);
 }

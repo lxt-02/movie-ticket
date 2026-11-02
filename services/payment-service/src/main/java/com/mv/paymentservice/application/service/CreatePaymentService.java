@@ -81,6 +81,10 @@ public class CreatePaymentService implements CreatePaymentUseCase {
             return succeeded.get();
         }
 
+        // Validate the deadline before touching PayOS: an invalid command must not cancel the buyer's open link.
+        // (Checked after the replay / already-paid cases, so a late redelivery still answers with the real state.)
+        Instant expiresAt = resolveExpiry(command, now);
+
         for (Payment open : bookingPayments) {
             if (open.getStatus().isTerminal()) {
                 continue;
@@ -99,7 +103,6 @@ public class CreatePaymentService implements CreatePaymentUseCase {
             }
         }
 
-        Instant expiresAt = resolveExpiry(command, now);
         Payment payment = Payment.createPending(
                 command.getBookingId(),
                 command.getUserId(),
