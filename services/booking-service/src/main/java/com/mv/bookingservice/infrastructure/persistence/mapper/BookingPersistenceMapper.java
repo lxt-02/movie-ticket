@@ -2,10 +2,8 @@ package com.mv.bookingservice.infrastructure.persistence.mapper;
 
 import com.mv.bookingservice.domain.model.booking.aggregate.Booking;
 import com.mv.bookingservice.domain.model.booking.entity.BookingSeat;
-import com.mv.bookingservice.domain.model.outbox.OutboxEvent;
 import com.mv.bookingservice.infrastructure.persistence.entity.BookingEntity;
 import com.mv.bookingservice.infrastructure.persistence.entity.BookingSeatEntity;
-import com.mv.bookingservice.infrastructure.persistence.entity.OutboxEventEntity;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -128,34 +126,6 @@ public class BookingPersistenceMapper {
                 .unitPrice(domain.getUnitPrice())
                 .ticketCode(domain.getTicketCode())
                 .status(domain.getStatus())
-                .build();
-    }
-
-    public OutboxEvent toOutboxDomain(OutboxEventEntity entity) {
-        if (entity == null) {
-            return null;
-        }
-        return OutboxEvent.builder()
-                .id(entity.getId())
-                .aggregateId(entity.getAggregateId())
-                .eventType(entity.getEventType())
-                .payload(entity.getPayload())
-                .publishedAt(entity.getPublishedAt())
-                .createdAt(entity.getCreatedAt())
-                .build();
-    }
-
-    public OutboxEventEntity toOutboxEntity(OutboxEvent domain) {
-        if (domain == null) {
-            return null;
-        }
-        return OutboxEventEntity.builder()
-                .id(domain.getId())
-                .aggregateId(domain.getAggregateId())
-                .eventType(domain.getEventType())
-                .payload(domain.getPayload())
-                .publishedAt(domain.getPublishedAt())
-                .createdAt(domain.getCreatedAt())
                 .build();
     }
 }

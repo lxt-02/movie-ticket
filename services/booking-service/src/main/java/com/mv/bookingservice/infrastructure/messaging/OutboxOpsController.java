@@ -1,9 +1,9 @@
 package com.mv.bookingservice.infrastructure.messaging;
 
 import com.mv.bookingservice.api.dto.response.ApiResponse;
-import com.mv.bookingservice.infrastructure.persistence.entity.OutboxEventEntity;
-import com.mv.bookingservice.infrastructure.persistence.entity.OutboxStatus;
-import com.mv.bookingservice.infrastructure.persistence.repository.OutboxEventJpaRepository;
+import com.mv.bookingservice.domain.model.outbox.OutboxMessageStatus;
+import com.mv.bookingservice.infrastructure.persistence.entity.OutboxMessageInfraEntity;
+import com.mv.bookingservice.infrastructure.persistence.repository.OutboxMessageJpaRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -31,7 +31,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class OutboxOpsController {
 
-    private final OutboxEventJpaRepository repository;
+    private final OutboxMessageJpaRepository repository;
     private final BookingOutboxRelay relay;
     private final TransactionTemplate transactionTemplate;
 
@@ -51,25 +51,26 @@ public class OutboxOpsController {
 
     private Map<String, Object> view() {
         Map<String, Object> view = new LinkedHashMap<>();
-        view.put("pending", repository.countByStatus(OutboxStatus.PENDING));
+        view.put("pending", repository.countByStatus(OutboxMessageStatus.PENDING.name()));
         view.put("pendingHeldBehindFailed", repository.countHeldBehindFailed());
-        view.put("failed", repository.countByStatus(OutboxStatus.FAILED));
-        view.put("oldestPendingAt", repository.oldestCreatedAt(OutboxStatus.PENDING));
-        repository.findFirstByStatusOrderByCreatedAtAsc(OutboxStatus.PENDING)
+        view.put("failed", repository.countByStatus(OutboxMessageStatus.FAILED.name()));
+        view.put("oldestPendingAt", repository.oldestCreatedAt(OutboxMessageStatus.PENDING.name()));
+        repository.findFirstByStatusOrderByCreatedAtAsc(OutboxMessageStatus.PENDING.name())
                 .ifPresent(e -> view.put("oldestPendingLastError", e.getLastError()));
         Instant paused = relay.pausedUntil();
         view.put("relayPausedUntil", paused.isAfter(Instant.now()) ? paused : null);
-        List<Map<String, Object>> failed = repository.findTop20ByStatusOrderByCreatedAtAsc(OutboxStatus.FAILED)
+        List<Map<String, Object>> failed = repository.findTop20ByStatusOrderByCreatedAtAsc(OutboxMessageStatus.FAILED.name())
                 .stream().map(OutboxOpsController::row).toList();
         view.put("failedRows", failed);
         return view;
     }
 
-    private static Map<String, Object> row(OutboxEventEntity e) {
+    private static Map<String, Object> row(OutboxMessageInfraEntity e) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("id", e.getId());
         row.put("bookingId", e.getAggregateId());
         row.put("eventType", e.getEventType());
+        row.put("topic", e.getTopic());
         row.put("retryCount", e.getRetryCount());
         row.put("lastError", e.getLastError());
         row.put("createdAt", e.getCreatedAt());

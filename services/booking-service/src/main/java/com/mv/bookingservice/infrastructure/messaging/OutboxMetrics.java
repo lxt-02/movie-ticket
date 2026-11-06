@@ -1,7 +1,7 @@
 package com.mv.bookingservice.infrastructure.messaging;
 
-import com.mv.bookingservice.infrastructure.persistence.entity.OutboxStatus;
-import com.mv.bookingservice.infrastructure.persistence.repository.OutboxEventJpaRepository;
+import com.mv.bookingservice.domain.model.outbox.OutboxMessageStatus;
+import com.mv.bookingservice.infrastructure.persistence.repository.OutboxMessageJpaRepository;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Component;
@@ -17,13 +17,13 @@ import java.time.Instant;
 @Component
 public class OutboxMetrics {
 
-    public OutboxMetrics(MeterRegistry registry, OutboxEventJpaRepository repository) {
-        Gauge.builder("booking.outbox.messages", repository, r -> r.countByStatus(OutboxStatus.PENDING))
+    public OutboxMetrics(MeterRegistry registry, OutboxMessageJpaRepository repository) {
+        Gauge.builder("booking.outbox.messages", repository, r -> r.countByStatus(OutboxMessageStatus.PENDING.name()))
                 .tag("status", "pending").description("Outbox rows not published yet").register(registry);
-        Gauge.builder("booking.outbox.messages", repository, r -> r.countByStatus(OutboxStatus.FAILED))
+        Gauge.builder("booking.outbox.messages", repository, r -> r.countByStatus(OutboxMessageStatus.FAILED.name()))
                 .tag("status", "failed").description("Outbox rows with a permanent error").register(registry);
         Gauge.builder("booking.outbox.oldest.pending.seconds", repository, r -> {
-            Instant oldest = r.oldestCreatedAt(OutboxStatus.PENDING);
+            Instant oldest = r.oldestCreatedAt(OutboxMessageStatus.PENDING.name());
             return oldest == null ? 0 : Duration.between(oldest, Instant.now()).toSeconds();
         }).description("Age of the oldest unpublished outbox row").register(registry);
     }
