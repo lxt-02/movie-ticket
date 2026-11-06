@@ -1,7 +1,6 @@
 package com.mv.paymentservice.infrastructure.persistence.repository;
 
-import com.mv.paymentservice.infrastructure.persistence.entity.OutboxMessageEntity;
-import com.mv.paymentservice.infrastructure.persistence.entity.OutboxStatus;
+import com.mv.paymentservice.infrastructure.persistence.entity.OutboxMessageInfraEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -13,7 +12,7 @@ import java.util.List;
 import java.util.UUID;
 
 @Repository
-public interface OutboxMessageJpaRepository extends JpaRepository<OutboxMessageEntity, UUID> {
+public interface OutboxMessageJpaRepository extends JpaRepository<OutboxMessageInfraEntity, UUID> {
 
     /**
      * Claimable messages: PENDING ready for (re)try, or PROCESSING stuck past its deadline
@@ -29,23 +28,22 @@ public interface OutboxMessageJpaRepository extends JpaRepository<OutboxMessageE
             LIMIT :limit
             FOR UPDATE SKIP LOCKED
             """, nativeQuery = true)
-    List<OutboxMessageEntity> findClaimableForUpdate(@Param("now") Instant now,
+    List<OutboxMessageInfraEntity> findClaimableForUpdate(@Param("now") Instant now,
                                                      @Param("limit") int limit);
 
-    long countByStatus(OutboxStatus status);
+    long countByStatus(String status);
 
-    List<OutboxMessageEntity> findTop20ByStatusOrderByCreatedAtAsc(OutboxStatus status);
+    List<OutboxMessageInfraEntity> findTop20ByStatusOrderByCreatedAtAsc(String status);
 
-    @Query("SELECT MIN(m.createdAt) FROM OutboxMessageEntity m WHERE m.status = :status")
-    Instant oldestCreatedAt(@Param("status") OutboxStatus status);
+    @Query("SELECT MIN(m.createdAt) FROM OutboxMessageInfraEntity m WHERE m.status = :status")
+    Instant oldestCreatedAt(@Param("status") String status);
 
-    /** FAILED -> PENDING once the cause is fixed. Consumers dedupe by eventId, so a re-send is harmless. */
+    /** FAILED -> PENDING once the cause is fixed. A re-send is harmless: booking-service applies payment events by booking state. */
     @Modifying
     @Query("""
-            UPDATE OutboxMessageEntity m
-            SET m.status = com.mv.paymentservice.infrastructure.persistence.entity.OutboxStatus.PENDING,
-                m.retryCount = 0, m.nextRetryAt = null
-            WHERE m.status = com.mv.paymentservice.infrastructure.persistence.entity.OutboxStatus.FAILED
+            UPDATE OutboxMessageInfraEntity m
+            SET m.status = 'PENDING', m.retryCount = 0, m.nextRetryAt = null
+            WHERE m.status = 'FAILED'
             """)
     int requeueFailed();
 }
