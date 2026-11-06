@@ -1,12 +1,11 @@
 package com.mv.bookingservice.infrastructure.messaging;
 
-import com.mv.bookingservice.application.port.out.OutboxPort;
-import com.mv.bookingservice.domain.model.outbox.OutboxEvent;
+import com.mv.bookingservice.application.port.out.OutboxMessagePort;
+import com.mv.bookingservice.domain.model.outbox.OutboxMessage;
 import com.mv.bookingservice.infrastructure.config.JsonCodec;
 import com.mv.bookingservice.infrastructure.config.KafkaConfig;
-import com.mv.bookingservice.infrastructure.persistence.entity.OutboxEventEntity;
-import com.mv.bookingservice.infrastructure.persistence.entity.OutboxStatus;
-import com.mv.bookingservice.infrastructure.persistence.repository.OutboxEventJpaRepository;
+import com.mv.bookingservice.infrastructure.persistence.entity.OutboxMessageInfraEntity;
+import com.mv.bookingservice.infrastructure.persistence.repository.OutboxMessageJpaRepository;
 import jakarta.persistence.EntityManager;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -89,7 +88,7 @@ class OutboxKafkaFailureScenariosTest {
     }
 
     @Autowired
-    private OutboxEventJpaRepository repository;
+    private OutboxMessageJpaRepository repository;
     @Autowired
     private TransactionTemplate transactionTemplate;
     @Autowired
@@ -97,7 +96,7 @@ class OutboxKafkaFailureScenariosTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
     @Autowired
-    private OutboxPort outboxPort;
+    private OutboxMessagePort outboxPort;
 
     private final MutableClock clock = new MutableClock(Instant.parse("2026-11-02T03:00:00Z"));
     private final BookingKafkaProperties properties =
@@ -132,8 +131,8 @@ class OutboxKafkaFailureScenariosTest {
         assertThat(producer.history().get(0).value()).contains(createA.toString());
         assertThat(producer.history().get(2).value()).contains(cancelA.toString());
         assertThat(List.of(createA, createB, cancelA)).allSatisfy(id -> {
-            OutboxEventEntity e = repository.findById(id).orElseThrow();
-            assertThat(e.getStatus()).isEqualTo(OutboxStatus.PUBLISHED);
+            OutboxMessageInfraEntity e = repository.findById(id).orElseThrow();
+            assertThat(e.getStatus()).isEqualTo("PUBLISHED");
             assertThat(e.getPublishedAt()).isNotNull();
         });
     }
@@ -154,9 +153,9 @@ class OutboxKafkaFailureScenariosTest {
             relay.relay();
             Duration took = Duration.ofNanos(System.nanoTime() - started);
 
-            OutboxEventEntity row = repository.findById(id).orElseThrow();
+            OutboxMessageInfraEntity row = repository.findById(id).orElseThrow();
             assertThat(took).isLessThan(Duration.ofSeconds(10));
-            assertThat(row.getStatus()).isEqualTo(OutboxStatus.PENDING);
+            assertThat(row.getStatus()).isEqualTo("PENDING");
             assertThat(row.getPublishedAt()).isNull();
             assertThat(row.getRetryCount()).isEqualTo(1);
             assertThat(row.getLastError()).contains("TimeoutException");
@@ -178,7 +177,7 @@ class OutboxKafkaFailureScenariosTest {
         MockProducer<String, String> producer = mockProducer(new StringSerializer());
         relay(new KafkaTemplate<>(() -> producer)).relay();
         assertThat(producer.history()).hasSize(1);
-        assertThat(repository.findById(id).orElseThrow().getStatus()).isEqualTo(OutboxStatus.PUBLISHED);
+        assertThat(repository.findById(id).orElseThrow().getStatus()).isEqualTo("PUBLISHED");
     }
 
     @Test
@@ -196,17 +195,16 @@ class OutboxKafkaFailureScenariosTest {
     @Test
     @DisplayName("3. Sai tên topic (broker không tự tạo topic): dòng giữ PENDING với lỗi rõ ràng, không 'gửi thành công' vào topic ma")
     void wrongTopicIsNotSilentlyDelivered() {
-        UUID id = row(UUID.randomUUID(), "CREATE_PAYMENT", 0);
-        BookingKafkaProperties typo = new BookingKafkaProperties("payment-comands", "payment-events", 50, 15_000L,
-                10_000L, 60_000L, 2_000L, 60_000L, 10, false);
+        // The topic is stored on the row (outbox_messages.topic): here a typo written by the producer side.
+        UUID id = row(UUID.randomUUID(), "CREATE_PAYMENT", 0, "payment-comands");
         // What KafkaTemplate throws when auto.create.topics.enable=false and the topic does not exist.
         KafkaTemplate<String, String> template = failing(topic -> new org.apache.kafka.common.KafkaException(
                 "Send failed", new TimeoutException("Topic " + topic + " not present in metadata after 5000 ms.")));
 
-        new BookingOutboxRelay(repository, template, typo, transactionTemplate, entityManager, clock).relay();
+        relay(template).relay();
 
-        OutboxEventEntity row = repository.findById(id).orElseThrow();
-        assertThat(row.getStatus()).isEqualTo(OutboxStatus.PENDING);
+        OutboxMessageInfraEntity row = repository.findById(id).orElseThrow();
+        assertThat(row.getStatus()).isEqualTo("PENDING");
         assertThat(row.getPublishedAt()).isNull();
         assertThat(row.getLastError()).contains("payment-comands").contains("not present in metadata");
         System.out.println("SCENARIO wrong-topic: row PENDING, last_error=" + row.getLastError());
@@ -248,11 +246,11 @@ class OutboxKafkaFailureScenariosTest {
 
         relay.relay();
 
-        assertThat(repository.findById(createDenied).orElseThrow().getStatus()).isEqualTo(OutboxStatus.FAILED);
+        assertThat(repository.findById(createDenied).orElseThrow().getStatus()).isEqualTo("FAILED");
         assertThat(repository.findById(createDenied).orElseThrow().getLastError())
                 .startsWith("TopicAuthorizationException");
-        assertThat(repository.findById(createOther).orElseThrow().getStatus()).isEqualTo(OutboxStatus.PUBLISHED);
-        assertThat(repository.findById(cancelDenied).orElseThrow().getStatus()).isEqualTo(OutboxStatus.PENDING);
+        assertThat(repository.findById(createOther).orElseThrow().getStatus()).isEqualTo("PUBLISHED");
+        assertThat(repository.findById(cancelDenied).orElseThrow().getStatus()).isEqualTo("PENDING");
         assertThat(producer.history()).extracting(ProducerRecord::key).containsExactly(other.toString());
         assertThat(repository.countHeldBehindFailed()).isEqualTo(1);
 
@@ -267,7 +265,7 @@ class OutboxKafkaFailureScenariosTest {
                 .containsExactly(other.toString(), denied.toString(), denied.toString());
         assertThat(producer.history().get(1).value()).contains(createDenied.toString());
         assertThat(producer.history().get(2).value()).contains(cancelDenied.toString());
-        assertThat(repository.countByStatus(OutboxStatus.PUBLISHED)).isEqualTo(3);
+        assertThat(repository.countByStatus("PUBLISHED")).isEqualTo(3);
     }
 
     // ------------------------------------------------------------------ payload -> message
@@ -287,9 +285,9 @@ class OutboxKafkaFailureScenariosTest {
 
         relay(new KafkaTemplate<>(() -> producer)).relay();
 
-        assertThat(repository.findById(bad).orElseThrow().getStatus()).isEqualTo(OutboxStatus.FAILED);
+        assertThat(repository.findById(bad).orElseThrow().getStatus()).isEqualTo("FAILED");
         assertThat(repository.findById(bad).orElseThrow().getLastError()).startsWith("SerializationException");
-        assertThat(repository.findById(good).orElseThrow().getStatus()).isEqualTo(OutboxStatus.PUBLISHED);
+        assertThat(repository.findById(good).orElseThrow().getStatus()).isEqualTo("PUBLISHED");
     }
 
     @Test
@@ -304,27 +302,31 @@ class OutboxKafkaFailureScenariosTest {
         };
         assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(s -> {
             // Something written earlier in the same business transaction...
-            outboxPort.save(OutboxEvent.create(booking, "CREATE_PAYMENT", "{\"step\":\"earlier write\"}"));
+            outboxPort.save(OutboxMessage.pending("BOOKING", booking, "CREATE_PAYMENT", TOPIC, booking.toString(),
+                    "{\"step\":\"earlier write\"}"));
             // ...then the command payload cannot be turned into JSON.
-            outboxPort.save(OutboxEvent.create(booking, "CANCEL_PAYMENT", broken.write(new Object())));
+            outboxPort.save(OutboxMessage.pending("BOOKING", booking, "CANCEL_PAYMENT", TOPIC, booking.toString(),
+                    broken.write(new Object())));
         })).isInstanceOf(IllegalStateException.class);
 
         assertThat(repository.findAll()).noneMatch(e -> e.getAggregateId().equals(booking));
     }
 
     @Test
-    @DisplayName("5c. Loại event không có topic: FAILED ngay (trước đây bị bỏ qua âm thầm, còn lệnh sau vượt lên)")
-    void unknownEventTypeFails() {
+    @DisplayName("5c. Topic và key lấy từ dòng outbox (topic, message_key), không suy ra từ event type")
+    void topicAndKeyComeFromTheRow() {
         UUID booking = UUID.randomUUID();
-        UUID unknown = row(booking, "REFUND_PAYMENT", 0);
-        UUID later = row(booking, "CANCEL_PAYMENT", 1);
+        UUID onCommands = row(booking, "CREATE_PAYMENT", 0);
+        UUID onOther = row(booking, "REFUND_PAYMENT", 1, "payment-refunds");
         MockProducer<String, String> producer = mockProducer(new StringSerializer());
 
         relay(new KafkaTemplate<>(() -> producer)).relay();
 
-        assertThat(repository.findById(unknown).orElseThrow().getStatus()).isEqualTo(OutboxStatus.FAILED);
-        assertThat(repository.findById(later).orElseThrow().getStatus()).isEqualTo(OutboxStatus.PENDING);
-        assertThat(producer.history()).isEmpty();
+        assertThat(producer.history()).extracting(ProducerRecord::topic).containsExactly(TOPIC, "payment-refunds");
+        assertThat(producer.history()).extracting(ProducerRecord::key)
+                .containsExactly(booking.toString(), booking.toString());
+        assertThat(repository.findById(onCommands).orElseThrow().getStatus()).isEqualTo("PUBLISHED");
+        assertThat(repository.findById(onOther).orElseThrow().getStatus()).isEqualTo("PUBLISHED");
     }
 
     @Test
@@ -376,12 +378,21 @@ class OutboxKafkaFailureScenariosTest {
     // ------------------------------------------------------------------ helpers
 
     private UUID row(UUID bookingId, String type, int secondsAfterStart) {
+        return row(bookingId, type, secondsAfterStart, TOPIC);
+    }
+
+    private UUID row(UUID bookingId, String type, int secondsAfterStart, String topic) {
         UUID id = UUID.randomUUID();
-        repository.save(OutboxEventEntity.builder()
+        repository.save(OutboxMessageInfraEntity.builder()
                 .id(id)
+                .aggregateType("BOOKING")
                 .aggregateId(bookingId)
                 .eventType(type)
+                .topic(topic)
+                .messageKey(bookingId.toString())
                 .payload("{\"commandId\":\"" + id + "\",\"commandType\":\"" + type + "\"}")
+                .status("PENDING")
+                .retryCount(0)
                 .createdAt(clock.instant().minusSeconds(60).plusSeconds(secondsAfterStart))
                 .build());
         return id;
