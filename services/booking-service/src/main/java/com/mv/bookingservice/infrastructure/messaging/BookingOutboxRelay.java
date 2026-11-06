@@ -1,8 +1,8 @@
 package com.mv.bookingservice.infrastructure.messaging;
 
-import com.mv.bookingservice.infrastructure.persistence.entity.OutboxEventEntity;
-import com.mv.bookingservice.infrastructure.persistence.entity.OutboxStatus;
-import com.mv.bookingservice.infrastructure.persistence.repository.OutboxEventJpaRepository;
+import com.mv.bookingservice.domain.model.outbox.OutboxMessageStatus;
+import com.mv.bookingservice.infrastructure.persistence.entity.OutboxMessageInfraEntity;
+import com.mv.bookingservice.infrastructure.persistence.repository.OutboxMessageJpaRepository;
 import jakarta.persistence.EntityManager;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,7 +21,7 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Publishes PENDING outbox_events to Kafka, oldest first.
+ * Publishes PENDING outbox_messages to Kafka (row topic + message_key), oldest first.
  * <p>
  * <b>Several booking-service instances</b> (load balancing): every instance runs this job, but only one may publish
  * at a time, otherwise the same command is sent twice and CREATE / CANCEL of one booking can overtake each other.
@@ -34,7 +34,7 @@ import java.util.concurrent.TimeUnit;
  *     <li>Temporary (broker down, topic not found, timeout): the row stays PENDING with {@code retry_count},
  *     {@code last_error} and a back-off ({@code next_retry_at}: 2s, 4s, 8s ... max {@code relay-retry-max-delay-ms}).
  *     The run stops and the relay pauses until then: every other row would hit the same broker problem.</li>
- *     <li>Permanent (no permission, record too large, unknown event type): the row becomes FAILED and the run
+ *     <li>Permanent (no permission, record too large): the row becomes FAILED and the run
  *     <b>continues with the other bookings</b>. Later rows of the same booking wait behind it (order kept).
  *     Fix the cause, then POST /api/v1/bookings/admin/outbox/requeue-failed.</li>
  * </ul>
@@ -48,7 +48,7 @@ public class BookingOutboxRelay {
     static final String LOCK_NAME = "booking-outbox";
     static final int MAX_ERROR_LENGTH = 2000;
 
-    private final OutboxEventJpaRepository repository;
+    private final OutboxMessageJpaRepository repository;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final BookingKafkaProperties properties;
     private final TransactionTemplate transactionTemplate;
@@ -59,7 +59,7 @@ public class BookingOutboxRelay {
     private volatile Instant pausedUntil = Instant.EPOCH;
 
     @Autowired
-    public BookingOutboxRelay(OutboxEventJpaRepository repository,
+    public BookingOutboxRelay(OutboxMessageJpaRepository repository,
                               KafkaTemplate<String, String> kafkaTemplate,
                               BookingKafkaProperties properties,
                               TransactionTemplate transactionTemplate,
@@ -67,7 +67,7 @@ public class BookingOutboxRelay {
         this(repository, kafkaTemplate, properties, transactionTemplate, entityManager, Clock.systemUTC());
     }
 
-    BookingOutboxRelay(OutboxEventJpaRepository repository,
+    BookingOutboxRelay(OutboxMessageJpaRepository repository,
                        KafkaTemplate<String, String> kafkaTemplate,
                        BookingKafkaProperties properties,
                        TransactionTemplate transactionTemplate,
@@ -115,10 +115,10 @@ public class BookingOutboxRelay {
     /** Never throws: the outcome of every attempted row is saved when the transaction commits. */
     private void publishBatch() {
         Instant now = clock.instant();
-        List<OutboxEventEntity> pending = repository.findPublishable(properties.relayBatchSize());
+        List<OutboxMessageInfraEntity> pending = repository.findPublishable(properties.relayBatchSize());
         // Bookings whose older command is not delivered yet: their later commands must wait (order per booking).
         Set<UUID> held = new HashSet<>();
-        for (OutboxEventEntity event : pending) {
+        for (OutboxMessageInfraEntity event : pending) {
             UUID bookingId = event.getAggregateId();
             if (held.contains(bookingId)) {
                 continue;
@@ -127,14 +127,8 @@ public class BookingOutboxRelay {
                 held.add(bookingId);
                 continue;
             }
-            String topic = topicFor(event.getEventType());
-            if (topic == null) {
-                markFailed(event, "No Kafka topic for outbox event type " + event.getEventType());
-                held.add(bookingId);
-                continue;
-            }
             try {
-                kafkaTemplate.send(topic, bookingId.toString(), event.getPayload())
+                kafkaTemplate.send(event.getTopic(), event.getMessageKey(), event.getPayload())
                         .get(properties.publishTimeoutMs(), TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -151,8 +145,8 @@ public class BookingOutboxRelay {
                 return;
             }
             log.info("Kafka SEND topic={} key={} type={} body={}",
-                    topic, bookingId, event.getEventType(), event.getPayload());
-            event.setStatus(OutboxStatus.PUBLISHED);
+                    event.getTopic(), event.getMessageKey(), event.getEventType(), event.getPayload());
+            event.setStatus(OutboxMessageStatus.PUBLISHED.name());
             event.setPublishedAt(clock.instant());
             event.setNextRetryAt(null);
             event.setLastError(null);
@@ -160,7 +154,7 @@ public class BookingOutboxRelay {
         }
     }
 
-    private void markForRetry(OutboxEventEntity event, Throwable cause, Instant now) {
+    private void markForRetry(OutboxMessageInfraEntity event, Throwable cause, Instant now) {
         int attempts = event.getRetryCount() + 1;
         Duration delay = backOff(attempts);
         event.setRetryCount(attempts);
@@ -176,8 +170,8 @@ public class BookingOutboxRelay {
         }
     }
 
-    private void markFailed(OutboxEventEntity event, String error) {
-        event.setStatus(OutboxStatus.FAILED);
+    private void markFailed(OutboxMessageInfraEntity event, String error) {
+        event.setStatus(OutboxMessageStatus.FAILED.name());
         event.setRetryCount(event.getRetryCount() + 1);
         event.setNextRetryAt(null);
         event.setLastError(error);
@@ -193,13 +187,5 @@ public class BookingOutboxRelay {
         long max = properties.relayRetryMaxDelayMs();
         long delay = initial << Math.min(attempts - 1, 20);
         return Duration.ofMillis(Math.min(delay, max));
-    }
-
-    private String topicFor(String eventType) {
-        if (PaymentCommandOutboxAdapter.CREATE_PAYMENT.equals(eventType)
-                || PaymentCommandOutboxAdapter.CANCEL_PAYMENT.equals(eventType)) {
-            return properties.paymentCommands();
-        }
-        return null;
     }
 }
