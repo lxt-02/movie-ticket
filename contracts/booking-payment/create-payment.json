@@ -1,0 +1,16 @@
+{
+  "commandId": "7f1c2a9e-0b7d-4c55-9a4e-1d2f3a4b5c6d",
+  "aggregateId": "3b6a1d2e-8f4c-4a7b-9c1d-2e3f4a5b6c7d",
+  "commandType": "CREATE_PAYMENT",
+  "occurredAt": "2026-11-04T03:00:00Z",
+  "payload": {
+    "bookingId": "3b6a1d2e-8f4c-4a7b-9c1d-2e3f4a5b6c7d",
+    "userId": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+    "amount": 150000,
+    "currency": "VND",
+    "provider": "PAYOS",
+    "description": "Booking BK-0001",
+    "expiredAt": "2026-11-04T03:07:00Z",
+    "idempotencyKey": "payment:create:PAYOS:3b6a1d2e-8f4c-4a7b-9c1d-2e3f4a5b6c7d:1"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "topics": {
+    "paymentCommands": "payment-commands",
+    "paymentEvents": "payment-events"
+  },
+  "commandTypes": ["CREATE_PAYMENT", "CANCEL_PAYMENT"],
+  "eventTypes": [
+    "PAYMENT_LINK_CREATED",
+    "PAYMENT_CREATE_FAILED",
+    "PAYMENT_SUCCEEDED",
+    "PAYMENT_FAILED",
+    "PAYMENT_EXPIRED",
+    "PAYMENT_CANCELLED"
+  ],
+  "createFailedReasons": ["PAYMENT_PROVIDER_ERROR", "INVALID_PAYMENT_REQUEST"]
+}
