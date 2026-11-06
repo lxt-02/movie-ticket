@@ -3,15 +3,16 @@ package com.mv.movieservice.infrastructure.messaging;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mv.movieservice.application.event.MovieEventType;
+import com.mv.movieservice.application.port.out.OutboxMessagePort;
 import com.mv.movieservice.domain.model.movie.aggregate.Movie;
 import com.mv.movieservice.domain.model.movie.enums.CrewRole;
 import com.mv.movieservice.domain.model.movie.enums.MovieStatus;
 import com.mv.movieservice.domain.model.movie.valueobject.CrewMember;
 import com.mv.movieservice.domain.model.movie.valueobject.Genre;
 import com.mv.movieservice.domain.model.movie.valueobject.MovieDetails;
+import com.mv.movieservice.domain.model.outbox.OutboxMessage;
+import com.mv.movieservice.domain.model.outbox.OutboxMessageStatus;
 import com.mv.movieservice.infrastructure.config.JsonCodec;
-import com.mv.movieservice.infrastructure.persistence.entity.OutboxEventEntity;
-import com.mv.movieservice.infrastructure.persistence.repository.OutboxEventJpaRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -30,9 +31,11 @@ class MovieEventOutboxAdapterTest {
 
     @Test
     void writesTheFullSnapshotWithUpdatedAtAsVersion() throws Exception {
-        OutboxEventJpaRepository repository = mock(OutboxEventJpaRepository.class);
+        OutboxMessagePort port = mock(OutboxMessagePort.class);
         Instant now = Instant.parse("2026-10-21T08:00:00Z");
-        MovieEventOutboxAdapter adapter = new MovieEventOutboxAdapter(repository, new JsonCodec(), Clock.fixed(now, ZoneOffset.UTC));
+        MovieKafkaProperties properties = new MovieKafkaProperties("movie-events", 3, 100, 5000L);
+        MovieEventOutboxAdapter adapter = new MovieEventOutboxAdapter(port, properties, new JsonCodec(),
+                Clock.fixed(now, ZoneOffset.UTC));
 
         UUID directorId = UUID.randomUUID();
         UUID actorId = UUID.randomUUID();
@@ -47,15 +50,20 @@ class MovieEventOutboxAdapterTest {
 
         adapter.publish(movie, MovieEventType.MOVIE_CREATED);
 
-        ArgumentCaptor<OutboxEventEntity> captor = ArgumentCaptor.forClass(OutboxEventEntity.class);
-        verify(repository).save(captor.capture());
-        OutboxEventEntity row = captor.getValue();
+        ArgumentCaptor<OutboxMessage> captor = ArgumentCaptor.forClass(OutboxMessage.class);
+        verify(port).save(captor.capture());
+        OutboxMessage row = captor.getValue();
+        assertThat(row.getAggregateType()).isEqualTo("MOVIE");
         assertThat(row.getAggregateId()).isEqualTo(movie.getId());
         assertThat(row.getEventType()).isEqualTo("MOVIE_CREATED");
+        assertThat(row.getTopic()).isEqualTo("movie-events");
+        assertThat(row.getMessageKey()).isEqualTo(movie.getId().toString());
+        assertThat(row.getStatus()).isEqualTo(OutboxMessageStatus.PENDING);
+        assertThat(row.getRetryCount()).isZero();
         assertThat(row.getPublishedAt()).isNull();
 
         JsonNode message = new ObjectMapper().readTree(row.getPayload());
-        assertThat(message.get("eventId").asText()).isEqualTo(row.getId().toString());
+        assertThat(message.get("eventId").asText()).isNotBlank();
         assertThat(message.get("version").asLong()).isEqualTo(updatedAt.toEpochMilli());
         JsonNode payload = message.get("payload");
         assertThat(payload.get("title").asText()).isEqualTo("Lật Mặt 7");
