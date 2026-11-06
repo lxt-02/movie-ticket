@@ -16,8 +16,8 @@ import org.springframework.stereotype.Component;
  *     {@code payment-events.DLT} (see KafkaConfig). An unreadable record (malformed JSON, no eventId) goes to the
  *     DLT at once, without retries ({@link NonRetryableMessageException}).</li>
  *     <li>{@link #onDeadLetter}: replays the DLT. Not started on boot: started on demand once the cause is fixed
- *     (POST /api/v1/bookings/admin/payment-events-dlt/replay). Safe to replay: the inbox skips events already
- *     applied.</li>
+ *     (POST /api/v1/bookings/admin/payment-events-dlt/replay). Safe to replay: the handlers are state-guarded, so
+ *     an event already applied changes nothing.</li>
  * </ul>
  */
 @Slf4j
