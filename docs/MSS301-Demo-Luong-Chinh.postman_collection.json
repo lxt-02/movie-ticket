@@ -1,0 +1,3536 @@
+{
+  "info": {
+    "name": "MSS301 - Demo luồng chính & công nghệ",
+    "description": "Luồng nghiệp vụ quan trọng + các công nghệ: Keycloak/JWT, API Gateway (rate limit Redis, load balancing Eureka, correlation id), Saga booking ↔ payment qua Kafka với Transactional Outbox, PayOS webhook (HMAC), idempotency, retry + DLT + replay, circuit breaker Resilience4j, CQRS search (Kafka → Elasticsearch), tracing Zipkin, Prometheus.\n\nChuẩn bị:\n1. docker compose --profile app up -d --build (đợi các service đăng ký Eureka ~1 phút)\n2. Điền biến collection payosChecksumKey = PAYOS_CHECKSUM_KEY trong services/payment-service/.env (payment-service cũng phải có PAYOS_CLIENT_ID / PAYOS_API_KEY thật để tạo được link)\n3. Runner: chạy folder 0 → 8 theo thứ tự (folder 7 mất ~1.5 phút). Folder 9 chạy tay.\nHết ghế trống ở suất mẫu: đổi biến showtimeId.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "0. Chuẩn bị - đăng nhập Keycloak",
+      "item": [
+        {
+          "name": "0.1 Login customer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": "{{kc}}",
+            "description": "Token của khách đặt vé.",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "mss301-frontend"
+                },
+                {
+                  "key": "username",
+                  "value": "customer"
+                },
+                {
+                  "key": "password",
+                  "value": "123456"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('customerToken', pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "0.2 Login admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": "{{kc}}",
+            "description": "Token admin cho API vận hành outbox / DLT.",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "mss301-frontend"
+                },
+                {
+                  "key": "username",
+                  "value": "admin"
+                },
+                {
+                  "key": "password",
+                  "value": "123456"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('adminToken', pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "0.3 Login blocked (tài khoản bị khoá)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": "{{kc}}",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "mss301-frontend"
+                },
+                {
+                  "key": "username",
+                  "value": "blocked"
+                },
+                {
+                  "key": "password",
+                  "value": "123456"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"blockedToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Lấy JWT từ Keycloak (OAuth2 password grant, client mss301-frontend). Gateway kiểm token, rồi chuyển danh tính xuống service qua header X-User-Id / X-User-Role."
+    },
+    {
+      "name": "1. Bảo mật & API Gateway",
+      "item": [
+        {
+          "name": "1.1 Không có token → 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"showtimeId\": \"{{showtimeId}}\",\n  \"seats\": [\n    {\n      \"showtimeSeatId\": \"{{seat1}}\"\n    },\n    {\n      \"showtimeSeatId\": \"{{seat2}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Gateway (Spring Security resource server) chặn trước khi tới booking-service."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"idemKey\", pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.2 Token giả / sai chữ ký → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJoYWNrZXIifQ.ZmFrZQ"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings",
+            "description": "JWT không do Keycloak ký: gateway kiểm chữ ký bằng JWK của realm và từ chối."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.3 Customer gọi API của ADMIN → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/movies",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Không được tạo\",\n  \"durationMinutes\": 90,\n  \"status\": \"NOW_SHOWING\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Phân quyền theo role trong token (realm role). Customer không được tạo phim."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.4 Customer gọi API vận hành outbox → 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings/admin/outbox",
+            "description": "/api/v1/bookings/admin/** chỉ cho ADMIN / STAFF."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.5 /internal/** không mở ra ngoài",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{base}}/internal/payments/by-booking/00000000-0000-0000-0000-000000000000/paid-status",
+            "description": "API service-to-service (Feign qua Eureka) không có route trên gateway, kể cả với token admin."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Không trả 200 (bị chặn ở gateway)', () => pm.expect(pm.response.code).to.not.eql(200));",
+                  "console.log('Gateway trả', pm.response.code);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.6 Tài khoản bị khoá đặt vé → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{blockedToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"showtimeId\": \"{{showtimeId}}\",\n  \"seats\": [\n    { \"showtimeSeatId\": \"{{$guid}}\" }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Token hợp lệ nhưng user-service báo tài khoản bị khoá (booking hỏi user-service qua Feign trước khi giữ ghế)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Lý do: tài khoản bị khoá', () => pm.expect(pm.response.json().message).to.match(/kho[aá]/i));",
+                  "console.log(pm.response.json().message);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1.7 Correlation ID xuyên suốt các service",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{corrId}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/movies?page=0&size=1",
+            "description": "Gateway giữ X-Correlation-Id của client (hoặc tự tạo), trả lại trong response và truyền xuống mọi service (log có [cid=...])."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('corrId', 'demo-' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Response trả lại đúng X-Correlation-Id', () =>",
+                  "    pm.expect(pm.response.headers.get('X-Correlation-Id')).to.eql(pm.collectionVariables.get('corrId')));",
+                  "console.log('Tìm trong log các service: cid=' + pm.collectionVariables.get('corrId'));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Keycloak + JWT ở gateway, phân quyền theo role, chặn /internal/**, correlation id."
+    },
+    {
+      "name": "2. Rate limit (Redis token bucket)",
+      "item": [
+        {
+          "name": "2.1 Đặt vé dồn dập → 429 + Retry-After",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"showtimeId\": \"{{showtimeId}}\",\n  \"seats\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Route POST /api/v1/bookings bị giới hạn theo user (sub của token): burst 3, hồi 1 token/giây. Các request cố ý thiếu Idempotency-Key nên request lọt qua chỉ nhận 400, không giữ ghế thật. Pre-request bắn 4 request liền, request chính phải bị 429."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const burst = (makeReq, count, gapMs, done, log) => {",
+                  "    const step = i => {",
+                  "        if (i >= count) return done();",
+                  "        pm.sendRequest(makeReq(i), (err, res) => {",
+                  "            log(i, err, res);",
+                  "            setTimeout(() => step(i + 1), gapMs);",
+                  "        });",
+                  "    };",
+                  "    step(0);",
+                  "};",
+                  "",
+                  "const codes = [];",
+                  "burst(() => ({ url: V('base') + '/api/v1/bookings', method: 'POST',",
+                  "               header: [{ key: 'Authorization', value: 'Bearer ' + V('customerToken') }, { key: 'Content-Type', value: 'application/json' }],",
+                  "               body: { mode: 'raw', raw: JSON.stringify({ showtimeId: V('showtimeId'), seats: [] }) } }),",
+                  "      4, 0, () => console.log('Pre-request:', codes.join(', ')),",
+                  "      (i, err, res) => codes.push('#' + (i + 1) + '=' + (res ? res.code + ' remaining=' + res.headers.get('X-RateLimit-Remaining') : err)));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 429 Too Many Requests', () => pm.response.to.have.status(429));",
+                  "pm.test('Có Retry-After', () => pm.expect(pm.response.headers.get('Retry-After')).to.exist);",
+                  "console.log('X-RateLimit-Remaining=' + pm.response.headers.get('X-RateLimit-Remaining')",
+                  "    + ', X-RateLimit-Burst-Capacity=' + pm.response.headers.get('X-RateLimit-Burst-Capacity')",
+                  "    + ', Retry-After=' + pm.response.headers.get('Retry-After'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2.2 Giới hạn theo IP (khách ẩn danh) → 429",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/rate-limit/ip/ping",
+            "description": "Route demo giới hạn theo IP client: burst 5, hồi 1/giây. Pre-request bắn 6 request."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const burst = (makeReq, count, gapMs, done, log) => {",
+                  "    const step = i => {",
+                  "        if (i >= count) return done();",
+                  "        pm.sendRequest(makeReq(i), (err, res) => {",
+                  "            log(i, err, res);",
+                  "            setTimeout(() => step(i + 1), gapMs);",
+                  "        });",
+                  "    };",
+                  "    step(0);",
+                  "};",
+                  "",
+                  "const codes = [];",
+                  "burst(() => ({ url: V('base') + '/rate-limit/ip/ping', method: 'GET' }), 6, 0,",
+                  "      () => console.log('Pre-request:', codes.join(', ')),",
+                  "      (i, err, res) => codes.push(res ? res.code : 'ERR'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 429', () => pm.response.to.have.status(429));",
+                  "console.log('Retry-After=' + pm.response.headers.get('Retry-After'));",
+                  "// Cho bucket của customer hồi lại trước các folder đặt vé.",
+                  "setTimeout(() => {}, 3500);"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Spring Cloud Gateway RequestRateLimiter + Redis. Key trong Redis: rl:{user|ip|apikey}:{id}:{routeId}."
+    },
+    {
+      "name": "3. Service discovery & Load balancing (Eureka)",
+      "item": [
+        {
+          "name": "3.1 Gọi 10 lần → chia đều giữa các instance (X-Served-By)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/movies?page=0&size=1",
+            "description": "Gateway route lb://movie-service, chọn instance từ Eureka (round-robin) và ghi instance đã chọn vào X-Served-By. Muốn thấy 2 instance: docker compose --profile app up -d --scale movie-service=2 (đợi ~30s cho Eureka)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const burst = (makeReq, count, gapMs, done, log) => {",
+                  "    const step = i => {",
+                  "        if (i >= count) return done();",
+                  "        pm.sendRequest(makeReq(i), (err, res) => {",
+                  "            log(i, err, res);",
+                  "            setTimeout(() => step(i + 1), gapMs);",
+                  "        });",
+                  "    };",
+                  "    step(0);",
+                  "};",
+                  "",
+                  "const seen = {};",
+                  "burst(() => ({ url: V('base') + '/api/v1/movies?page=0&size=1', method: 'GET' }), 10, 100, () => {",
+                  "    pm.collectionVariables.set('servedBy', JSON.stringify(seen));",
+                  "}, (i, err, res) => { const s = res && res.headers.get('X-Served-By'); if (s) seen[s] = (seen[s] || 0) + 1; });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Gateway ghi instance đã chọn (X-Served-By)', () => pm.expect(pm.response.headers.get('X-Served-By')).to.exist);",
+                  "const seen = JSON.parse(pm.collectionVariables.get('servedBy') || '{}');",
+                  "console.log('Phân bổ 10 request:', seen);",
+                  "const n = Object.keys(seen).length;",
+                  "(n > 1 ? pm.test : pm.test.skip)('Request được chia cho ' + n + ' instance', () => pm.expect(n).to.be.above(1));",
+                  "if (n <= 1) console.warn('Chỉ có 1 instance movie-service. Chạy --scale movie-service=2 để demo cân bằng tải.');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Saga đặt vé → thanh toán thành công (Outbox + Kafka + PayOS)",
+      "item": [
+        {
+          "name": "4.1 Lấy 1 ghế trống",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/showtimes/{{showtimeId}}/seats",
+            "description": "Chọn ghế AVAILABLE đầu tiên. Mỗi kịch bản dùng 1 ghế; hết ghế thì đổi biến showtimeId."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const free = (pm.response.json().data || []).filter(s => s.status === 'AVAILABLE');",
+                  "pm.test('Còn ghế trống', () => pm.expect(free.length).to.be.above(0));",
+                  "if (free[0]) {",
+                  "    pm.collectionVariables.set('seatId', free[0].showtimeSeatId);",
+                  "    console.log('Ghế chọn:', free[0].showtimeSeatId, free[0].seatLabel || free[0].label || '', '| còn trống:', free.length);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.2 Tạo booking (PENDING) - giữ ghế + ghi outbox",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"showtimeId\": \"{{showtimeId}}\",\n  \"seats\": [\n    { \"showtimeSeatId\": \"{{seatId}}\" }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "booking-service giữ ghế ở showtime (HTTP), lưu booking + dòng CREATE_PAYMENT vào outbox_messages trong CÙNG một transaction. Kafka không nằm trên đường HTTP."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('idemKey', pm.variables.replaceIn('{{$guid}}'));",
+                  "// Mốc thời gian để đọc message trên Kafka UI (seek theo timestamp).",
+                  "pm.collectionVariables.set('sinceTs', Date.now() - 2000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json().data;",
+                  "pm.collectionVariables.set('bookingId', b.id);",
+                  "pm.collectionVariables.set('bookingCode', b.bookingCode);",
+                  "pm.test('Booking PENDING, có hạn thanh toán', () => {",
+                  "    pm.expect(b.status).to.eql('PENDING');",
+                  "    pm.expect(b.expiresAt).to.be.a('string');",
+                  "});",
+                  "console.log('bookingId =', b.id, '| code =', b.bookingCode, '| total =', b.totalAmount, b.currency, '| hết hạn lúc', b.expiresAt);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.3 Gửi lại cùng Idempotency-Key → cùng booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"showtimeId\": \"{{showtimeId}}\",\n  \"seats\": [\n    { \"showtimeSeatId\": \"{{seatId}}\" }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Client bấm 2 lần / mạng gửi lại: cùng key + cùng nội dung trả lại đúng booking cũ, không giữ thêm ghế."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "setTimeout(() => {}, 1200); // rate limit 1 token/giây"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200/201', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('Cùng bookingId', () => pm.expect(pm.response.json().data.id).to.eql(pm.collectionVariables.get('bookingId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.4 Showtime - ghế HELD",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/showtimes/{{showtimeId}}/seats"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "poll({ url: V('base') + '/api/v1/showtimes/' + V('showtimeId') + '/seats', method: 'GET' },",
+                  "     res => (res.json().data || []).some(s => s.showtimeSeatId === V('seatId') && s.status === 'HELD'), 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const s = (pm.response.json().data || []).find(x => x.showtimeSeatId === V('seatId')) || {};",
+                  "console.log('Ghế ' + V('seatId') + ': ' + s.status);",
+                  "pm.test('Ghế HELD', () => pm.expect(s.status).to.eql('HELD'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.5 Outbox booking - relay đã đẩy lên Kafka",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings/admin/outbox",
+            "description": "API vận hành outbox (ADMIN / STAFF): số dòng PENDING / FAILED, dòng PENDING cũ nhất và lỗi gần nhất."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "poll({ url: pm.variables.replaceIn(pm.request.url.toString()), method: 'GET', header: auth('adminToken') },",
+                  "     res => { const d = res.json().data || {}; return d.pending === 0; }, 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data || {};",
+                  "console.log('Outbox: pending=' + d.pending + (d.processing !== undefined ? ', processing=' + d.processing : '')",
+                  "    + ', failed=' + d.failed + ', oldestPendingAt=' + d.oldestPendingAt",
+                  "    + (d.oldestPendingLastError ? ', lastError=' + d.oldestPendingLastError : '')",
+                  "    + (d.relayPausedUntil ? ', relayPausedUntil=' + d.relayPausedUntil : ''));",
+                  "pm.test('Không còn dòng PENDING: CREATE_PAYMENT đã lên Kafka', () => pm.expect(d.pending).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.6 Kafka - CREATE_PAYMENT trên payment-commands",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{cmdTopic}}/messages?seekType=TIMESTAMP&seekTo=0::{{sinceTs}}&seekTo=1::{{sinceTs}}&seekTo=2::{{sinceTs}}&seekDirection=FORWARD&limit=100&q={{bookingId}}&filterQueryType=STRING_CONTAINS",
+            "description": "Relay của outbox đã đẩy message lên Kafka. Lọc theo bookingId, kể từ lúc tạo booking."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "// Kafka UI trả về text/event-stream: mỗi dòng 'data:{...}'; lấy các event type=MESSAGE.",
+                  "const readMsgs = text => text.split('\\n')",
+                  "    .filter(l => l.startsWith('data:'))",
+                  "    .map(l => { try { return JSON.parse(l.slice(5)); } catch (e) { return null; } })",
+                  "    .filter(e => e && e.type === 'MESSAGE').map(e => e.message);",
+                  "const parse = m => { try { return JSON.parse(m.content); } catch (e) { return {}; } };",
+                  "const typeOf = b => b.commandType || b.eventType;",
+                  "const match = m => { const b = parse(m); return typeOf(b) === 'CREATE_PAYMENT' && String(m.key) === V('bookingId') && (b.payload && String(b.payload.idempotencyKey).endsWith(':1')); };",
+                  "const url = pm.variables.replaceIn(pm.request.url.toString());",
+                  "poll({ url: url, method: 'GET' }, res => readMsgs(res.text()).some(match), 30, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "// Kafka UI trả về text/event-stream: mỗi dòng 'data:{...}'; lấy các event type=MESSAGE.",
+                  "const readMsgs = text => text.split('\\n')",
+                  "    .filter(l => l.startsWith('data:'))",
+                  "    .map(l => { try { return JSON.parse(l.slice(5)); } catch (e) { return null; } })",
+                  "    .filter(e => e && e.type === 'MESSAGE').map(e => e.message);",
+                  "const parse = m => { try { return JSON.parse(m.content); } catch (e) { return {}; } };",
+                  "const typeOf = b => b.commandType || b.eventType;",
+                  "const match = m => { const b = parse(m); return typeOf(b) === 'CREATE_PAYMENT' && String(m.key) === V('bookingId') && (b.payload && String(b.payload.idempotencyKey).endsWith(':1')); };",
+                  "const msgs = readMsgs(pm.response.text());",
+                  "const m = msgs.filter(match).pop();",
+                  "console.log('Message của booking này trên ' + V('cmdTopic') + ':', msgs.map(x => typeOf(parse(x)) + '@p' + x.partition + '/' + x.offset).join(', '));",
+                  "pm.test('Có message CREATE_PAYMENT trên ' + V('cmdTopic') + ', key = bookingId', () => pm.expect(m, 'không thấy message (xem Kafka UI)').to.exist);",
+                  "if (m) {",
+                  "    const b = parse(m);",
+                  "    console.log('CREATE_PAYMENT -> partition ' + m.partition + ', offset ' + m.offset + ', lúc ' + m.timestamp);",
+                  "    console.log('payload', b);",
+                  "    pm.collectionVariables.set('msgTopic', V('cmdTopic'));",
+                  "    pm.collectionVariables.set('msgPartition', m.partition);",
+                  "    pm.collectionVariables.set('msgOffset', m.offset);",
+                  "    pm.test('Message có aggregateId = bookingId', () => pm.expect(String(b.aggregateId)).to.eql(V('bookingId')));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.7 Payment - link PayOS + QR đã tạo",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/payments/by-booking/{{bookingId}}",
+            "description": "Payment mới nhất của booking (404 cho tới khi payment-service xử lý CREATE_PAYMENT)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "poll({ url: V('base') + '/api/v1/payments/by-booking/' + V('bookingId'), method: 'GET', header: auth('customerToken') },",
+                  "     res => { if (res.code !== 200) return false; const p = res.json().data; return p.status === 'PENDING' && !!p.checkoutUrl; }, 30, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json().data || {};",
+                  "console.log('payment ' + p.id + ': status=' + p.status + ', amount=' + p.amount + ' ' + p.currency + ', orderCode=' + p.payosOrderCode",
+                  "    + ', paymentLinkId=' + p.gatewayTransactionId + (p.failureReason ? ', reason=' + p.failureReason : ''));",
+                  "if (p.checkoutUrl) console.log('Link PayOS (mở để xem QR, KHÔNG cần trả tiền thật):', p.checkoutUrl);",
+                  "pm.test('link PayOS đã tạo (PENDING, có checkoutUrl)', () => { pm.expect((() => p.status === 'PENDING' && !!p.checkoutUrl)(), 'status hiện tại: ' + p.status).to.be.true; });",
+                  "",
+                  "pm.collectionVariables.set('paymentId', p.id);",
+                  "pm.collectionVariables.set('orderCode', p.payosOrderCode);",
+                  "pm.collectionVariables.set('paymentLinkId', p.gatewayTransactionId);",
+                  "pm.collectionVariables.set('payAmount', Math.round(Number(p.amount)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.8 Kafka - PAYMENT_LINK_CREATED trên payment-events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{evtTopic}}/messages?seekType=TIMESTAMP&seekTo=0::{{sinceTs}}&seekTo=1::{{sinceTs}}&seekTo=2::{{sinceTs}}&seekDirection=FORWARD&limit=100&q={{bookingId}}&filterQueryType=STRING_CONTAINS",
+            "description": "Relay của outbox đã đẩy message lên Kafka. Lọc theo bookingId, kể từ lúc tạo booking."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "// Kafka UI trả về text/event-stream: mỗi dòng 'data:{...}'; lấy các event type=MESSAGE.",
+                  "const readMsgs = text => text.split('\\n')",
+                  "    .filter(l => l.startsWith('data:'))",
+                  "    .map(l => { try { return JSON.parse(l.slice(5)); } catch (e) { return null; } })",
+                  "    .filter(e => e && e.type === 'MESSAGE').map(e => e.message);",
+                  "const parse = m => { try { return JSON.parse(m.content); } catch (e) { return {}; } };",
+                  "const typeOf = b => b.commandType || b.eventType;",
+                  "const match = m => { const b = parse(m); return typeOf(b) === 'PAYMENT_LINK_CREATED' && String(m.key) === V('bookingId') && (true); };",
+                  "const url = pm.variables.replaceIn(pm.request.url.toString());",
+                  "poll({ url: url, method: 'GET' }, res => readMsgs(res.text()).some(match), 30, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "// Kafka UI trả về text/event-stream: mỗi dòng 'data:{...}'; lấy các event type=MESSAGE.",
+                  "const readMsgs = text => text.split('\\n')",
+                  "    .filter(l => l.startsWith('data:'))",
+                  "    .map(l => { try { return JSON.parse(l.slice(5)); } catch (e) { return null; } })",
+                  "    .filter(e => e && e.type === 'MESSAGE').map(e => e.message);",
+                  "const parse = m => { try { return JSON.parse(m.content); } catch (e) { return {}; } };",
+                  "const typeOf = b => b.commandType || b.eventType;",
+                  "const match = m => { const b = parse(m); return typeOf(b) === 'PAYMENT_LINK_CREATED' && String(m.key) === V('bookingId') && (true); };",
+                  "const msgs = readMsgs(pm.response.text());",
+                  "const m = msgs.filter(match).pop();",
+                  "console.log('Message của booking này trên ' + V('evtTopic') + ':', msgs.map(x => typeOf(parse(x)) + '@p' + x.partition + '/' + x.offset).join(', '));",
+                  "pm.test('Có message PAYMENT_LINK_CREATED trên ' + V('evtTopic') + ', key = bookingId', () => pm.expect(m, 'không thấy message (xem Kafka UI)').to.exist);",
+                  "if (m) {",
+                  "    const b = parse(m);",
+                  "    console.log('PAYMENT_LINK_CREATED -> partition ' + m.partition + ', offset ' + m.offset + ', lúc ' + m.timestamp);",
+                  "    console.log('payload', b);",
+                  "    pm.collectionVariables.set('msgTopic', V('evtTopic'));",
+                  "    pm.collectionVariables.set('msgPartition', m.partition);",
+                  "    pm.collectionVariables.set('msgOffset', m.offset);",
+                  "    pm.test('Message có aggregateId = bookingId', () => pm.expect(String(b.aggregateId)).to.eql(V('bookingId')));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.9 Webhook PayOS - thanh toán thành công (ký HMAC-SHA256)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/payments/payos/webhook",
+            "body": {
+              "mode": "raw",
+              "raw": "{{webhookBody}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Endpoint công khai PayOS gọi về. payment-service kiểm chữ ký, đối chiếu orderCode / amount / paymentLinkId, đổi trạng thái payment và ghi event vào outbox_messages trong cùng một transaction."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Giả lập PayOS gọi webhook: ký \"data\" bằng HMAC-SHA256 với checksum key, giống PayOS thật",
+                  "// (các field của data sắp theo tên, nối \"key=value\" bằng \"&\"; null -> chuỗi rỗng).",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const key = V('payosChecksumKey');",
+                  "if (!key) throw new Error('Chưa nhập biến payosChecksumKey (= PAYOS_CHECKSUM_KEY trong services/payment-service/.env)');",
+                  "const KIND = 'paid';",
+                  "const paid = KIND !== 'failed';",
+                  "const vnNow = new Date(Date.now() + 7 * 3600 * 1000).toISOString().replace('T', ' ').slice(0, 19);",
+                  "const data = {",
+                  "    orderCode: Number(V('orderCode')),",
+                  "    amount: Number(V('payAmount')) + (KIND === 'wrongAmount' ? 1000 : 0),",
+                  "    description: 'MSS301 ' + V('bookingCode'),",
+                  "    accountNumber: '0000000000',",
+                  "    reference: 'PM' + Date.now(),",
+                  "    transactionDateTime: vnNow,",
+                  "    currency: 'VND',",
+                  "    paymentLinkId: V('paymentLinkId'),",
+                  "    code: paid ? '00' : '01',",
+                  "    desc: paid ? 'success' : 'Giao dich that bai',",
+                  "    counterAccountBankId: '', counterAccountBankName: '', counterAccountName: '', counterAccountNumber: '',",
+                  "    virtualAccountName: '', virtualAccountNumber: ''",
+                  "};",
+                  "const signed = Object.keys(data).sort()",
+                  "    .map(k => k + '=' + (data[k] === null || data[k] === undefined ? '' : String(data[k]))).join('&');",
+                  "let signature = CryptoJS.HmacSHA256(signed, key).toString(CryptoJS.enc.Hex);",
+                  "if (KIND === 'badSignature') signature = '0'.repeat(64);",
+                  "const body = JSON.stringify({ code: paid ? '00' : '01', desc: paid ? 'success' : 'failed', success: paid, data: data, signature: signature });",
+                  "pm.collectionVariables.set('webhookBody', body);",
+                  "if (KIND === 'paid') pm.collectionVariables.set('lastPaidWebhook', body);",
+                  "console.log('Webhook (' + KIND + ') orderCode=' + data.orderCode + ' amount=' + data.amount + ' paymentLinkId=' + data.paymentLinkId);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "console.log('Phản hồi:', pm.response.text());"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.10 Payment - SUCCESS",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/payments/by-booking/{{bookingId}}",
+            "description": "Payment mới nhất của booking (404 cho tới khi payment-service xử lý CREATE_PAYMENT)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "poll({ url: V('base') + '/api/v1/payments/by-booking/' + V('bookingId'), method: 'GET', header: auth('customerToken') },",
+                  "     res => { if (res.code !== 200) return false; const p = res.json().data; return p.status === 'SUCCESS'; }, 30, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json().data || {};",
+                  "console.log('payment ' + p.id + ': status=' + p.status + ', amount=' + p.amount + ' ' + p.currency + ', orderCode=' + p.payosOrderCode",
+                  "    + ', paymentLinkId=' + p.gatewayTransactionId + (p.failureReason ? ', reason=' + p.failureReason : ''));",
+                  "if (p.checkoutUrl) console.log('Link PayOS (mở để xem QR, KHÔNG cần trả tiền thật):', p.checkoutUrl);",
+                  "pm.test('SUCCESS', () => { pm.expect((() => p.status === 'SUCCESS')(), 'status hiện tại: ' + p.status).to.be.true; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.11 Kafka - PAYMENT_SUCCEEDED trên payment-events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{evtTopic}}/messages?seekType=TIMESTAMP&seekTo=0::{{sinceTs}}&seekTo=1::{{sinceTs}}&seekTo=2::{{sinceTs}}&seekDirection=FORWARD&limit=100&q={{bookingId}}&filterQueryType=STRING_CONTAINS",
+            "description": "Relay của outbox đã đẩy message lên Kafka. Lọc theo bookingId, kể từ lúc tạo booking."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "// Kafka UI trả về text/event-stream: mỗi dòng 'data:{...}'; lấy các event type=MESSAGE.",
+                  "const readMsgs = text => text.split('\\n')",
+                  "    .filter(l => l.startsWith('data:'))",
+                  "    .map(l => { try { return JSON.parse(l.slice(5)); } catch (e) { return null; } })",
+                  "    .filter(e => e && e.type === 'MESSAGE').map(e => e.message);",
+                  "const parse = m => { try { return JSON.parse(m.content); } catch (e) { return {}; } };",
+                  "const typeOf = b => b.commandType || b.eventType;",
+                  "const match = m => { const b = parse(m); return typeOf(b) === 'PAYMENT_SUCCEEDED' && String(m.key) === V('bookingId') && (true); };",
+                  "const url = pm.variables.replaceIn(pm.request.url.toString());",
+                  "poll({ url: url, method: 'GET' }, res => readMsgs(res.text()).some(match), 30, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "// Kafka UI trả về text/event-stream: mỗi dòng 'data:{...}'; lấy các event type=MESSAGE.",
+                  "const readMsgs = text => text.split('\\n')",
+                  "    .filter(l => l.startsWith('data:'))",
+                  "    .map(l => { try { return JSON.parse(l.slice(5)); } catch (e) { return null; } })",
+                  "    .filter(e => e && e.type === 'MESSAGE').map(e => e.message);",
+                  "const parse = m => { try { return JSON.parse(m.content); } catch (e) { return {}; } };",
+                  "const typeOf = b => b.commandType || b.eventType;",
+                  "const match = m => { const b = parse(m); return typeOf(b) === 'PAYMENT_SUCCEEDED' && String(m.key) === V('bookingId') && (true); };",
+                  "const msgs = readMsgs(pm.response.text());",
+                  "const m = msgs.filter(match).pop();",
+                  "console.log('Message của booking này trên ' + V('evtTopic') + ':', msgs.map(x => typeOf(parse(x)) + '@p' + x.partition + '/' + x.offset).join(', '));",
+                  "pm.test('Có message PAYMENT_SUCCEEDED trên ' + V('evtTopic') + ', key = bookingId', () => pm.expect(m, 'không thấy message (xem Kafka UI)').to.exist);",
+                  "if (m) {",
+                  "    const b = parse(m);",
+                  "    console.log('PAYMENT_SUCCEEDED -> partition ' + m.partition + ', offset ' + m.offset + ', lúc ' + m.timestamp);",
+                  "    console.log('payload', b);",
+                  "    pm.collectionVariables.set('msgTopic', V('evtTopic'));",
+                  "    pm.collectionVariables.set('msgPartition', m.partition);",
+                  "    pm.collectionVariables.set('msgOffset', m.offset);",
+                  "    pm.test('Message có aggregateId = bookingId', () => pm.expect(String(b.aggregateId)).to.eql(V('bookingId')));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.12 Booking - CONFIRMED",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings/{{bookingId}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "poll({ url: V('base') + '/api/v1/bookings/' + V('bookingId'), method: 'GET', header: auth('customerToken') },",
+                  "     res => res.code === 200 && res.json().data.status === 'CONFIRMED', 30, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json().data || {};",
+                  "console.log('booking ' + b.bookingCode + ': status=' + b.status + ', paidPaymentId=' + b.paidPaymentId + ', version=' + b.version);",
+                  "pm.test('Booking CONFIRMED', () => pm.expect(b.status).to.eql('CONFIRMED'));",
+                  "",
+                  "pm.test('paidPaymentId = payment đã trả', () => pm.expect(String(b.paidPaymentId)).to.eql(V('paymentId')));",
+                  "pm.collectionVariables.set('bookingVersion', b.version);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.13 Showtime - ghế BOOKED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/showtimes/{{showtimeId}}/seats"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "poll({ url: V('base') + '/api/v1/showtimes/' + V('showtimeId') + '/seats', method: 'GET' },",
+                  "     res => (res.json().data || []).some(s => s.showtimeSeatId === V('seatId') && s.status === 'BOOKED'), 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const s = (pm.response.json().data || []).find(x => x.showtimeSeatId === V('seatId')) || {};",
+                  "console.log('Ghế ' + V('seatId') + ': ' + s.status);",
+                  "pm.test('Ghế BOOKED', () => pm.expect(s.status).to.eql('BOOKED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.14 Webhook trùng → 200, không xử lý lại (idempotent)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/payments/payos/webhook",
+            "body": {
+              "mode": "raw",
+              "raw": "{{lastPaidWebhook}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200 (PayOS ngừng gửi lại)', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.15 Webhook giả mạo (chữ ký sai) → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/payments/payos/webhook",
+            "body": {
+              "mode": "raw",
+              "raw": "{{webhookBody}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Endpoint công khai PayOS gọi về. payment-service kiểm chữ ký, đối chiếu orderCode / amount / paymentLinkId, đổi trạng thái payment và ghi event vào outbox_messages trong cùng một transaction."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Giả lập PayOS gọi webhook: ký \"data\" bằng HMAC-SHA256 với checksum key, giống PayOS thật",
+                  "// (các field của data sắp theo tên, nối \"key=value\" bằng \"&\"; null -> chuỗi rỗng).",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const key = V('payosChecksumKey');",
+                  "if (!key) throw new Error('Chưa nhập biến payosChecksumKey (= PAYOS_CHECKSUM_KEY trong services/payment-service/.env)');",
+                  "const KIND = 'badSignature';",
+                  "const paid = KIND !== 'failed';",
+                  "const vnNow = new Date(Date.now() + 7 * 3600 * 1000).toISOString().replace('T', ' ').slice(0, 19);",
+                  "const data = {",
+                  "    orderCode: Number(V('orderCode')),",
+                  "    amount: Number(V('payAmount')) + (KIND === 'wrongAmount' ? 1000 : 0),",
+                  "    description: 'MSS301 ' + V('bookingCode'),",
+                  "    accountNumber: '0000000000',",
+                  "    reference: 'PM' + Date.now(),",
+                  "    transactionDateTime: vnNow,",
+                  "    currency: 'VND',",
+                  "    paymentLinkId: V('paymentLinkId'),",
+                  "    code: paid ? '00' : '01',",
+                  "    desc: paid ? 'success' : 'Giao dich that bai',",
+                  "    counterAccountBankId: '', counterAccountBankName: '', counterAccountName: '', counterAccountNumber: '',",
+                  "    virtualAccountName: '', virtualAccountNumber: ''",
+                  "};",
+                  "const signed = Object.keys(data).sort()",
+                  "    .map(k => k + '=' + (data[k] === null || data[k] === undefined ? '' : String(data[k]))).join('&');",
+                  "let signature = CryptoJS.HmacSHA256(signed, key).toString(CryptoJS.enc.Hex);",
+                  "if (KIND === 'badSignature') signature = '0'.repeat(64);",
+                  "const body = JSON.stringify({ code: paid ? '00' : '01', desc: paid ? 'success' : 'failed', success: paid, data: data, signature: signature });",
+                  "pm.collectionVariables.set('webhookBody', body);",
+                  "if (KIND === 'paid') pm.collectionVariables.set('lastPaidWebhook', body);",
+                  "console.log('Webhook (' + KIND + ') orderCode=' + data.orderCode + ' amount=' + data.amount + ' paymentLinkId=' + data.paymentLinkId);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "console.log('Phản hồi:', pm.response.text());"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.16 Webhook sai số tiền → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/payments/payos/webhook",
+            "body": {
+              "mode": "raw",
+              "raw": "{{webhookBody}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Endpoint công khai PayOS gọi về. payment-service kiểm chữ ký, đối chiếu orderCode / amount / paymentLinkId, đổi trạng thái payment và ghi event vào outbox_messages trong cùng một transaction."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Giả lập PayOS gọi webhook: ký \"data\" bằng HMAC-SHA256 với checksum key, giống PayOS thật",
+                  "// (các field của data sắp theo tên, nối \"key=value\" bằng \"&\"; null -> chuỗi rỗng).",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const key = V('payosChecksumKey');",
+                  "if (!key) throw new Error('Chưa nhập biến payosChecksumKey (= PAYOS_CHECKSUM_KEY trong services/payment-service/.env)');",
+                  "const KIND = 'wrongAmount';",
+                  "const paid = KIND !== 'failed';",
+                  "const vnNow = new Date(Date.now() + 7 * 3600 * 1000).toISOString().replace('T', ' ').slice(0, 19);",
+                  "const data = {",
+                  "    orderCode: Number(V('orderCode')),",
+                  "    amount: Number(V('payAmount')) + (KIND === 'wrongAmount' ? 1000 : 0),",
+                  "    description: 'MSS301 ' + V('bookingCode'),",
+                  "    accountNumber: '0000000000',",
+                  "    reference: 'PM' + Date.now(),",
+                  "    transactionDateTime: vnNow,",
+                  "    currency: 'VND',",
+                  "    paymentLinkId: V('paymentLinkId'),",
+                  "    code: paid ? '00' : '01',",
+                  "    desc: paid ? 'success' : 'Giao dich that bai',",
+                  "    counterAccountBankId: '', counterAccountBankName: '', counterAccountName: '', counterAccountNumber: '',",
+                  "    virtualAccountName: '', virtualAccountNumber: ''",
+                  "};",
+                  "const signed = Object.keys(data).sort()",
+                  "    .map(k => k + '=' + (data[k] === null || data[k] === undefined ? '' : String(data[k]))).join('&');",
+                  "let signature = CryptoJS.HmacSHA256(signed, key).toString(CryptoJS.enc.Hex);",
+                  "if (KIND === 'badSignature') signature = '0'.repeat(64);",
+                  "const body = JSON.stringify({ code: paid ? '00' : '01', desc: paid ? 'success' : 'failed', success: paid, data: data, signature: signature });",
+                  "pm.collectionVariables.set('webhookBody', body);",
+                  "if (KIND === 'paid') pm.collectionVariables.set('lastPaidWebhook', body);",
+                  "console.log('Webhook (' + KIND + ') orderCode=' + data.orderCode + ' amount=' + data.amount + ' paymentLinkId=' + data.paymentLinkId);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "console.log('Phản hồi:', pm.response.text());"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4.17 Zipkin - 1 trace đi qua booking → Kafka → payment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{zipkin}}/api/v2/traces?serviceName=payment-service&lookback=300000&limit=50",
+            "description": "Trace context đi trong header Kafka (observation-enabled), nên span của consumer nối vào trace của producer. Mở http://localhost:9411 để xem dạng biểu đồ."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const traces = pm.response.json() || [];",
+                  "const svc = t => [...new Set(t.map(s => s.localEndpoint && s.localEndpoint.serviceName))];",
+                  "const both = traces.find(t => { const s = svc(t); return s.includes('booking-service') && s.includes('payment-service'); });",
+                  "pm.test('Có trace chứa cả booking-service và payment-service', () => pm.expect(both, 'không thấy (tracing tắt?)').to.exist);",
+                  "if (both) {",
+                  "    console.log('traceId=' + both[0].traceId + ' đi qua: ' + svc(both).join(' -> '));",
+                  "    console.log('Mở: ' + pm.collectionVariables.get('zipkin') + '/zipkin/traces/' + both[0].traceId);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Luồng chính. booking giữ ghế (HTTP sang showtime) và ghi CREATE_PAYMENT vào outbox trong CÙNG transaction; relay đẩy lên Kafka; payment tạo link PayOS; webhook PayOS (giả lập, ký đúng HMAC) → PAYMENT_SUCCEEDED → booking xác nhận ghế. Cần biến payosChecksumKey và key PayOS thật trong payment-service/.env."
+    },
+    {
+      "name": "5. Huỷ booking → CANCEL_PAYMENT (bù trừ saga)",
+      "item": [
+        {
+          "name": "5.1 Lấy 1 ghế trống",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/showtimes/{{showtimeId}}/seats",
+            "description": "Chọn ghế AVAILABLE đầu tiên. Mỗi kịch bản dùng 1 ghế; hết ghế thì đổi biến showtimeId."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const free = (pm.response.json().data || []).filter(s => s.status === 'AVAILABLE');",
+                  "pm.test('Còn ghế trống', () => pm.expect(free.length).to.be.above(0));",
+                  "if (free[0]) {",
+                  "    pm.collectionVariables.set('seatId', free[0].showtimeSeatId);",
+                  "    console.log('Ghế chọn:', free[0].showtimeSeatId, free[0].seatLabel || free[0].label || '', '| còn trống:', free.length);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5.2 Tạo booking (PENDING)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"showtimeId\": \"{{showtimeId}}\",\n  \"seats\": [\n    { \"showtimeSeatId\": \"{{seatId}}\" }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "booking-service giữ ghế ở showtime (HTTP), lưu booking + dòng CREATE_PAYMENT vào outbox_messages trong CÙNG một transaction. Kafka không nằm trên đường HTTP."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('idemKey', pm.variables.replaceIn('{{$guid}}'));",
+                  "// Mốc thời gian để đọc message trên Kafka UI (seek theo timestamp).",
+                  "pm.collectionVariables.set('sinceTs', Date.now() - 2000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json().data;",
+                  "pm.collectionVariables.set('bookingId', b.id);",
+                  "pm.collectionVariables.set('bookingCode', b.bookingCode);",
+                  "pm.test('Booking PENDING, có hạn thanh toán', () => {",
+                  "    pm.expect(b.status).to.eql('PENDING');",
+                  "    pm.expect(b.expiresAt).to.be.a('string');",
+                  "});",
+                  "console.log('bookingId =', b.id, '| code =', b.bookingCode, '| total =', b.totalAmount, b.currency, '| hết hạn lúc', b.expiresAt);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5.3 Payment - link PayOS đã tạo",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/payments/by-booking/{{bookingId}}",
+            "description": "Payment mới nhất của booking (404 cho tới khi payment-service xử lý CREATE_PAYMENT)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "poll({ url: V('base') + '/api/v1/payments/by-booking/' + V('bookingId'), method: 'GET', header: auth('customerToken') },",
+                  "     res => { if (res.code !== 200) return false; const p = res.json().data; return p.status === 'PENDING' && !!p.checkoutUrl; }, 30, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json().data || {};",
+                  "console.log('payment ' + p.id + ': status=' + p.status + ', amount=' + p.amount + ' ' + p.currency + ', orderCode=' + p.payosOrderCode",
+                  "    + ', paymentLinkId=' + p.gatewayTransactionId + (p.failureReason ? ', reason=' + p.failureReason : ''));",
+                  "if (p.checkoutUrl) console.log('Link PayOS (mở để xem QR, KHÔNG cần trả tiền thật):', p.checkoutUrl);",
+                  "pm.test('link PayOS đã tạo', () => { pm.expect((() => p.status === 'PENDING' && !!p.checkoutUrl)(), 'status hiện tại: ' + p.status).to.be.true; });",
+                  "",
+                  "pm.collectionVariables.set('paymentId', p.id);",
+                  "pm.collectionVariables.set('orderCode', p.payosOrderCode);",
+                  "pm.collectionVariables.set('paymentLinkId', p.gatewayTransactionId);",
+                  "pm.collectionVariables.set('payAmount', Math.round(Number(p.amount)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5.4 Huỷ booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings/{{bookingId}}/cancel",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Đổi lịch\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('CANCELLED', () => pm.expect(pm.response.json().data.status).to.eql('CANCELLED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5.5 Kafka - CANCEL_PAYMENT trên payment-commands",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{cmdTopic}}/messages?seekType=TIMESTAMP&seekTo=0::{{sinceTs}}&seekTo=1::{{sinceTs}}&seekTo=2::{{sinceTs}}&seekDirection=FORWARD&limit=100&q={{bookingId}}&filterQueryType=STRING_CONTAINS",
+            "description": "Relay của outbox đã đẩy message lên Kafka. Lọc theo bookingId, kể từ lúc tạo booking."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "// Kafka UI trả về text/event-stream: mỗi dòng 'data:{...}'; lấy các event type=MESSAGE.",
+                  "const readMsgs = text => text.split('\\n')",
+                  "    .filter(l => l.startsWith('data:'))",
+                  "    .map(l => { try { return JSON.parse(l.slice(5)); } catch (e) { return null; } })",
+                  "    .filter(e => e && e.type === 'MESSAGE').map(e => e.message);",
+                  "const parse = m => { try { return JSON.parse(m.content); } catch (e) { return {}; } };",
+                  "const typeOf = b => b.commandType || b.eventType;",
+                  "const match = m => { const b = parse(m); return typeOf(b) === 'CANCEL_PAYMENT' && String(m.key) === V('bookingId') && (true); };",
+                  "const url = pm.variables.replaceIn(pm.request.url.toString());",
+                  "poll({ url: url, method: 'GET' }, res => readMsgs(res.text()).some(match), 30, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "// Kafka UI trả về text/event-stream: mỗi dòng 'data:{...}'; lấy các event type=MESSAGE.",
+                  "const readMsgs = text => text.split('\\n')",
+                  "    .filter(l => l.startsWith('data:'))",
+                  "    .map(l => { try { return JSON.parse(l.slice(5)); } catch (e) { return null; } })",
+                  "    .filter(e => e && e.type === 'MESSAGE').map(e => e.message);",
+                  "const parse = m => { try { return JSON.parse(m.content); } catch (e) { return {}; } };",
+                  "const typeOf = b => b.commandType || b.eventType;",
+                  "const match = m => { const b = parse(m); return typeOf(b) === 'CANCEL_PAYMENT' && String(m.key) === V('bookingId') && (true); };",
+                  "const msgs = readMsgs(pm.response.text());",
+                  "const m = msgs.filter(match).pop();",
+                  "console.log('Message của booking này trên ' + V('cmdTopic') + ':', msgs.map(x => typeOf(parse(x)) + '@p' + x.partition + '/' + x.offset).join(', '));",
+                  "pm.test('Có message CANCEL_PAYMENT trên ' + V('cmdTopic') + ', key = bookingId', () => pm.expect(m, 'không thấy message (xem Kafka UI)').to.exist);",
+                  "if (m) {",
+                  "    const b = parse(m);",
+                  "    console.log('CANCEL_PAYMENT -> partition ' + m.partition + ', offset ' + m.offset + ', lúc ' + m.timestamp);",
+                  "    console.log('payload', b);",
+                  "    pm.collectionVariables.set('msgTopic', V('cmdTopic'));",
+                  "    pm.collectionVariables.set('msgPartition', m.partition);",
+                  "    pm.collectionVariables.set('msgOffset', m.offset);",
+                  "    pm.test('Message có aggregateId = bookingId', () => pm.expect(String(b.aggregateId)).to.eql(V('bookingId')));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5.6 Payment - CANCELLED (link PayOS bị đóng)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/payments/by-booking/{{bookingId}}",
+            "description": "Payment mới nhất của booking (404 cho tới khi payment-service xử lý CREATE_PAYMENT)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "poll({ url: V('base') + '/api/v1/payments/by-booking/' + V('bookingId'), method: 'GET', header: auth('customerToken') },",
+                  "     res => { if (res.code !== 200) return false; const p = res.json().data; return p.status === 'CANCELLED'; }, 30, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json().data || {};",
+                  "console.log('payment ' + p.id + ': status=' + p.status + ', amount=' + p.amount + ' ' + p.currency + ', orderCode=' + p.payosOrderCode",
+                  "    + ', paymentLinkId=' + p.gatewayTransactionId + (p.failureReason ? ', reason=' + p.failureReason : ''));",
+                  "if (p.checkoutUrl) console.log('Link PayOS (mở để xem QR, KHÔNG cần trả tiền thật):', p.checkoutUrl);",
+                  "pm.test('CANCELLED', () => { pm.expect((() => p.status === 'CANCELLED')(), 'status hiện tại: ' + p.status).to.be.true; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5.7 Showtime - ghế trả lại AVAILABLE",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/showtimes/{{showtimeId}}/seats"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "poll({ url: V('base') + '/api/v1/showtimes/' + V('showtimeId') + '/seats', method: 'GET' },",
+                  "     res => (res.json().data || []).some(s => s.showtimeSeatId === V('seatId') && s.status === 'AVAILABLE'), 20, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const s = (pm.response.json().data || []).find(x => x.showtimeSeatId === V('seatId')) || {};",
+                  "console.log('Ghế ' + V('seatId') + ': ' + s.status);",
+                  "pm.test('Ghế AVAILABLE', () => pm.expect(s.status).to.eql('AVAILABLE'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6. Thanh toán thất bại → thanh toán lại",
+      "item": [
+        {
+          "name": "6.1 Lấy 1 ghế trống",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/showtimes/{{showtimeId}}/seats",
+            "description": "Chọn ghế AVAILABLE đầu tiên. Mỗi kịch bản dùng 1 ghế; hết ghế thì đổi biến showtimeId."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const free = (pm.response.json().data || []).filter(s => s.status === 'AVAILABLE');",
+                  "pm.test('Còn ghế trống', () => pm.expect(free.length).to.be.above(0));",
+                  "if (free[0]) {",
+                  "    pm.collectionVariables.set('seatId', free[0].showtimeSeatId);",
+                  "    console.log('Ghế chọn:', free[0].showtimeSeatId, free[0].seatLabel || free[0].label || '', '| còn trống:', free.length);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.2 Tạo booking (PENDING)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"showtimeId\": \"{{showtimeId}}\",\n  \"seats\": [\n    { \"showtimeSeatId\": \"{{seatId}}\" }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "booking-service giữ ghế ở showtime (HTTP), lưu booking + dòng CREATE_PAYMENT vào outbox_messages trong CÙNG một transaction. Kafka không nằm trên đường HTTP."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('idemKey', pm.variables.replaceIn('{{$guid}}'));",
+                  "// Mốc thời gian để đọc message trên Kafka UI (seek theo timestamp).",
+                  "pm.collectionVariables.set('sinceTs', Date.now() - 2000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json().data;",
+                  "pm.collectionVariables.set('bookingId', b.id);",
+                  "pm.collectionVariables.set('bookingCode', b.bookingCode);",
+                  "pm.test('Booking PENDING, có hạn thanh toán', () => {",
+                  "    pm.expect(b.status).to.eql('PENDING');",
+                  "    pm.expect(b.expiresAt).to.be.a('string');",
+                  "});",
+                  "console.log('bookingId =', b.id, '| code =', b.bookingCode, '| total =', b.totalAmount, b.currency, '| hết hạn lúc', b.expiresAt);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.3 Payment - link PayOS lần 1",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/payments/by-booking/{{bookingId}}",
+            "description": "Payment mới nhất của booking (404 cho tới khi payment-service xử lý CREATE_PAYMENT)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "poll({ url: V('base') + '/api/v1/payments/by-booking/' + V('bookingId'), method: 'GET', header: auth('customerToken') },",
+                  "     res => { if (res.code !== 200) return false; const p = res.json().data; return p.status === 'PENDING' && !!p.checkoutUrl; }, 30, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json().data || {};",
+                  "console.log('payment ' + p.id + ': status=' + p.status + ', amount=' + p.amount + ' ' + p.currency + ', orderCode=' + p.payosOrderCode",
+                  "    + ', paymentLinkId=' + p.gatewayTransactionId + (p.failureReason ? ', reason=' + p.failureReason : ''));",
+                  "if (p.checkoutUrl) console.log('Link PayOS (mở để xem QR, KHÔNG cần trả tiền thật):', p.checkoutUrl);",
+                  "pm.test('link PayOS lần 1', () => { pm.expect((() => p.status === 'PENDING' && !!p.checkoutUrl)(), 'status hiện tại: ' + p.status).to.be.true; });",
+                  "",
+                  "pm.collectionVariables.set('paymentId', p.id);",
+                  "pm.collectionVariables.set('orderCode', p.payosOrderCode);",
+                  "pm.collectionVariables.set('paymentLinkId', p.gatewayTransactionId);",
+                  "pm.collectionVariables.set('payAmount', Math.round(Number(p.amount)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.4 Webhook PayOS - giao dịch thất bại",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/payments/payos/webhook",
+            "body": {
+              "mode": "raw",
+              "raw": "{{webhookBody}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Endpoint công khai PayOS gọi về. payment-service kiểm chữ ký, đối chiếu orderCode / amount / paymentLinkId, đổi trạng thái payment và ghi event vào outbox_messages trong cùng một transaction."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Giả lập PayOS gọi webhook: ký \"data\" bằng HMAC-SHA256 với checksum key, giống PayOS thật",
+                  "// (các field của data sắp theo tên, nối \"key=value\" bằng \"&\"; null -> chuỗi rỗng).",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const key = V('payosChecksumKey');",
+                  "if (!key) throw new Error('Chưa nhập biến payosChecksumKey (= PAYOS_CHECKSUM_KEY trong services/payment-service/.env)');",
+                  "const KIND = 'failed';",
+                  "const paid = KIND !== 'failed';",
+                  "const vnNow = new Date(Date.now() + 7 * 3600 * 1000).toISOString().replace('T', ' ').slice(0, 19);",
+                  "const data = {",
+                  "    orderCode: Number(V('orderCode')),",
+                  "    amount: Number(V('payAmount')) + (KIND === 'wrongAmount' ? 1000 : 0),",
+                  "    description: 'MSS301 ' + V('bookingCode'),",
+                  "    accountNumber: '0000000000',",
+                  "    reference: 'PM' + Date.now(),",
+                  "    transactionDateTime: vnNow,",
+                  "    currency: 'VND',",
+                  "    paymentLinkId: V('paymentLinkId'),",
+                  "    code: paid ? '00' : '01',",
+                  "    desc: paid ? 'success' : 'Giao dich that bai',",
+                  "    counterAccountBankId: '', counterAccountBankName: '', counterAccountName: '', counterAccountNumber: '',",
+                  "    virtualAccountName: '', virtualAccountNumber: ''",
+                  "};",
+                  "const signed = Object.keys(data).sort()",
+                  "    .map(k => k + '=' + (data[k] === null || data[k] === undefined ? '' : String(data[k]))).join('&');",
+                  "let signature = CryptoJS.HmacSHA256(signed, key).toString(CryptoJS.enc.Hex);",
+                  "if (KIND === 'badSignature') signature = '0'.repeat(64);",
+                  "const body = JSON.stringify({ code: paid ? '00' : '01', desc: paid ? 'success' : 'failed', success: paid, data: data, signature: signature });",
+                  "pm.collectionVariables.set('webhookBody', body);",
+                  "if (KIND === 'paid') pm.collectionVariables.set('lastPaidWebhook', body);",
+                  "console.log('Webhook (' + KIND + ') orderCode=' + data.orderCode + ' amount=' + data.amount + ' paymentLinkId=' + data.paymentLinkId);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "console.log('Phản hồi:', pm.response.text());"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.5 Payment - FAILED",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/payments/by-booking/{{bookingId}}",
+            "description": "Payment mới nhất của booking (404 cho tới khi payment-service xử lý CREATE_PAYMENT)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "poll({ url: V('base') + '/api/v1/payments/by-booking/' + V('bookingId'), method: 'GET', header: auth('customerToken') },",
+                  "     res => { if (res.code !== 200) return false; const p = res.json().data; return p.status === 'FAILED'; }, 30, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json().data || {};",
+                  "console.log('payment ' + p.id + ': status=' + p.status + ', amount=' + p.amount + ' ' + p.currency + ', orderCode=' + p.payosOrderCode",
+                  "    + ', paymentLinkId=' + p.gatewayTransactionId + (p.failureReason ? ', reason=' + p.failureReason : ''));",
+                  "if (p.checkoutUrl) console.log('Link PayOS (mở để xem QR, KHÔNG cần trả tiền thật):', p.checkoutUrl);",
+                  "pm.test('FAILED', () => { pm.expect((() => p.status === 'FAILED')(), 'status hiện tại: ' + p.status).to.be.true; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.6 Booking vẫn PENDING (ghế vẫn giữ)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings/{{bookingId}}",
+            "description": "booking-service đã nhận PAYMENT_FAILED nhưng giữ booking PENDING."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Đợi một chút để consumer kịp xử lý (nếu có gì để xử lý).",
+                  "setTimeout(() => {}, 1000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json().data || {};",
+                  "console.log('booking ' + b.bookingCode + ': status=' + b.status + ', paidPaymentId=' + b.paidPaymentId + ', version=' + b.version);",
+                  "pm.test('Booking PENDING', () => pm.expect(b.status).to.eql('PENDING'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.7 Thanh toán lại (payment-retry)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings/{{bookingId}}/payment-retry"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('previousPaymentId', pm.collectionVariables.get('paymentId'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 202', () => pm.response.to.have.status(202));",
+                  "console.log(pm.response.json().message);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.8 Payment - link PayOS mới",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/payments/by-booking/{{bookingId}}",
+            "description": "Payment mới nhất của booking (404 cho tới khi payment-service xử lý CREATE_PAYMENT)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "poll({ url: V('base') + '/api/v1/payments/by-booking/' + V('bookingId'), method: 'GET', header: auth('customerToken') },",
+                  "     res => { if (res.code !== 200) return false; const p = res.json().data; return p.status === 'PENDING' && !!p.checkoutUrl && p.id !== V('previousPaymentId'); }, 30, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json().data || {};",
+                  "console.log('payment ' + p.id + ': status=' + p.status + ', amount=' + p.amount + ' ' + p.currency + ', orderCode=' + p.payosOrderCode",
+                  "    + ', paymentLinkId=' + p.gatewayTransactionId + (p.failureReason ? ', reason=' + p.failureReason : ''));",
+                  "if (p.checkoutUrl) console.log('Link PayOS (mở để xem QR, KHÔNG cần trả tiền thật):', p.checkoutUrl);",
+                  "pm.test('link PayOS mới (payment khác lần 1)', () => { pm.expect((() => p.status === 'PENDING' && !!p.checkoutUrl && p.id !== V('previousPaymentId'))(), 'status hiện tại: ' + p.status).to.be.true; });",
+                  "",
+                  "pm.collectionVariables.set('paymentId', p.id);",
+                  "pm.collectionVariables.set('orderCode', p.payosOrderCode);",
+                  "pm.collectionVariables.set('paymentLinkId', p.gatewayTransactionId);",
+                  "pm.collectionVariables.set('payAmount', Math.round(Number(p.amount)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.9 Webhook PayOS - trả thành công link mới",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/payments/payos/webhook",
+            "body": {
+              "mode": "raw",
+              "raw": "{{webhookBody}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Endpoint công khai PayOS gọi về. payment-service kiểm chữ ký, đối chiếu orderCode / amount / paymentLinkId, đổi trạng thái payment và ghi event vào outbox_messages trong cùng một transaction."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Giả lập PayOS gọi webhook: ký \"data\" bằng HMAC-SHA256 với checksum key, giống PayOS thật",
+                  "// (các field của data sắp theo tên, nối \"key=value\" bằng \"&\"; null -> chuỗi rỗng).",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const key = V('payosChecksumKey');",
+                  "if (!key) throw new Error('Chưa nhập biến payosChecksumKey (= PAYOS_CHECKSUM_KEY trong services/payment-service/.env)');",
+                  "const KIND = 'paid';",
+                  "const paid = KIND !== 'failed';",
+                  "const vnNow = new Date(Date.now() + 7 * 3600 * 1000).toISOString().replace('T', ' ').slice(0, 19);",
+                  "const data = {",
+                  "    orderCode: Number(V('orderCode')),",
+                  "    amount: Number(V('payAmount')) + (KIND === 'wrongAmount' ? 1000 : 0),",
+                  "    description: 'MSS301 ' + V('bookingCode'),",
+                  "    accountNumber: '0000000000',",
+                  "    reference: 'PM' + Date.now(),",
+                  "    transactionDateTime: vnNow,",
+                  "    currency: 'VND',",
+                  "    paymentLinkId: V('paymentLinkId'),",
+                  "    code: paid ? '00' : '01',",
+                  "    desc: paid ? 'success' : 'Giao dich that bai',",
+                  "    counterAccountBankId: '', counterAccountBankName: '', counterAccountName: '', counterAccountNumber: '',",
+                  "    virtualAccountName: '', virtualAccountNumber: ''",
+                  "};",
+                  "const signed = Object.keys(data).sort()",
+                  "    .map(k => k + '=' + (data[k] === null || data[k] === undefined ? '' : String(data[k]))).join('&');",
+                  "let signature = CryptoJS.HmacSHA256(signed, key).toString(CryptoJS.enc.Hex);",
+                  "if (KIND === 'badSignature') signature = '0'.repeat(64);",
+                  "const body = JSON.stringify({ code: paid ? '00' : '01', desc: paid ? 'success' : 'failed', success: paid, data: data, signature: signature });",
+                  "pm.collectionVariables.set('webhookBody', body);",
+                  "if (KIND === 'paid') pm.collectionVariables.set('lastPaidWebhook', body);",
+                  "console.log('Webhook (' + KIND + ') orderCode=' + data.orderCode + ' amount=' + data.amount + ' paymentLinkId=' + data.paymentLinkId);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "console.log('Phản hồi:', pm.response.text());"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6.10 Booking - CONFIRMED",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings/{{bookingId}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "poll({ url: V('base') + '/api/v1/bookings/' + V('bookingId'), method: 'GET', header: auth('customerToken') },",
+                  "     res => res.code === 200 && res.json().data.status === 'CONFIRMED', 30, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json().data || {};",
+                  "console.log('booking ' + b.bookingCode + ': status=' + b.status + ', paidPaymentId=' + b.paidPaymentId + ', version=' + b.version);",
+                  "pm.test('Booking CONFIRMED', () => pm.expect(b.status).to.eql('CONFIRMED'));",
+                  "",
+                  "pm.test('paidPaymentId = payment đã trả', () => pm.expect(String(b.paidPaymentId)).to.eql(V('paymentId')));",
+                  "pm.collectionVariables.set('bookingVersion', b.version);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "7. Lỗi xử lý event → retry → DLT → replay",
+      "item": [
+        {
+          "name": "7.1 Lấy 1 ghế trống",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/showtimes/{{showtimeId}}/seats",
+            "description": "Chọn ghế AVAILABLE đầu tiên. Mỗi kịch bản dùng 1 ghế; hết ghế thì đổi biến showtimeId."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const free = (pm.response.json().data || []).filter(s => s.status === 'AVAILABLE');",
+                  "pm.test('Còn ghế trống', () => pm.expect(free.length).to.be.above(0));",
+                  "if (free[0]) {",
+                  "    pm.collectionVariables.set('seatId', free[0].showtimeSeatId);",
+                  "    console.log('Ghế chọn:', free[0].showtimeSeatId, free[0].seatLabel || free[0].label || '', '| còn trống:', free.length);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7.2 Tạo booking (PENDING)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"showtimeId\": \"{{showtimeId}}\",\n  \"seats\": [\n    { \"showtimeSeatId\": \"{{seatId}}\" }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "booking-service giữ ghế ở showtime (HTTP), lưu booking + dòng CREATE_PAYMENT vào outbox_messages trong CÙNG một transaction. Kafka không nằm trên đường HTTP."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('idemKey', pm.variables.replaceIn('{{$guid}}'));",
+                  "// Mốc thời gian để đọc message trên Kafka UI (seek theo timestamp).",
+                  "pm.collectionVariables.set('sinceTs', Date.now() - 2000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json().data;",
+                  "pm.collectionVariables.set('bookingId', b.id);",
+                  "pm.collectionVariables.set('bookingCode', b.bookingCode);",
+                  "pm.test('Booking PENDING, có hạn thanh toán', () => {",
+                  "    pm.expect(b.status).to.eql('PENDING');",
+                  "    pm.expect(b.expiresAt).to.be.a('string');",
+                  "});",
+                  "console.log('bookingId =', b.id, '| code =', b.bookingCode, '| total =', b.totalAmount, b.currency, '| hết hạn lúc', b.expiresAt);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7.3 Payment - link PayOS đã tạo",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/payments/by-booking/{{bookingId}}",
+            "description": "Payment mới nhất của booking (404 cho tới khi payment-service xử lý CREATE_PAYMENT)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "poll({ url: V('base') + '/api/v1/payments/by-booking/' + V('bookingId'), method: 'GET', header: auth('customerToken') },",
+                  "     res => { if (res.code !== 200) return false; const p = res.json().data; return p.status === 'PENDING' && !!p.checkoutUrl; }, 30, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json().data || {};",
+                  "console.log('payment ' + p.id + ': status=' + p.status + ', amount=' + p.amount + ' ' + p.currency + ', orderCode=' + p.payosOrderCode",
+                  "    + ', paymentLinkId=' + p.gatewayTransactionId + (p.failureReason ? ', reason=' + p.failureReason : ''));",
+                  "if (p.checkoutUrl) console.log('Link PayOS (mở để xem QR, KHÔNG cần trả tiền thật):', p.checkoutUrl);",
+                  "pm.test('link PayOS đã tạo', () => { pm.expect((() => p.status === 'PENDING' && !!p.checkoutUrl)(), 'status hiện tại: ' + p.status).to.be.true; });",
+                  "",
+                  "pm.collectionVariables.set('paymentId', p.id);",
+                  "pm.collectionVariables.set('orderCode', p.payosOrderCode);",
+                  "pm.collectionVariables.set('paymentLinkId', p.gatewayTransactionId);",
+                  "pm.collectionVariables.set('payAmount', Math.round(Number(p.amount)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7.4 Bật chaos: booking giả lập DB lỗi khi nhận event",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings/admin/chaos/payment-events?fail=true"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200 (cần BOOKING_DEMO_CHAOS_ENABLED=true)', () => pm.response.to.have.status(200));",
+                  "console.log(pm.response.json());"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7.5 Webhook PayOS - thanh toán thành công",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/payments/payos/webhook",
+            "body": {
+              "mode": "raw",
+              "raw": "{{webhookBody}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Endpoint công khai PayOS gọi về. payment-service kiểm chữ ký, đối chiếu orderCode / amount / paymentLinkId, đổi trạng thái payment và ghi event vào outbox_messages trong cùng một transaction."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Giả lập PayOS gọi webhook: ký \"data\" bằng HMAC-SHA256 với checksum key, giống PayOS thật",
+                  "// (các field của data sắp theo tên, nối \"key=value\" bằng \"&\"; null -> chuỗi rỗng).",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const key = V('payosChecksumKey');",
+                  "if (!key) throw new Error('Chưa nhập biến payosChecksumKey (= PAYOS_CHECKSUM_KEY trong services/payment-service/.env)');",
+                  "const KIND = 'paid';",
+                  "const paid = KIND !== 'failed';",
+                  "const vnNow = new Date(Date.now() + 7 * 3600 * 1000).toISOString().replace('T', ' ').slice(0, 19);",
+                  "const data = {",
+                  "    orderCode: Number(V('orderCode')),",
+                  "    amount: Number(V('payAmount')) + (KIND === 'wrongAmount' ? 1000 : 0),",
+                  "    description: 'MSS301 ' + V('bookingCode'),",
+                  "    accountNumber: '0000000000',",
+                  "    reference: 'PM' + Date.now(),",
+                  "    transactionDateTime: vnNow,",
+                  "    currency: 'VND',",
+                  "    paymentLinkId: V('paymentLinkId'),",
+                  "    code: paid ? '00' : '01',",
+                  "    desc: paid ? 'success' : 'Giao dich that bai',",
+                  "    counterAccountBankId: '', counterAccountBankName: '', counterAccountName: '', counterAccountNumber: '',",
+                  "    virtualAccountName: '', virtualAccountNumber: ''",
+                  "};",
+                  "const signed = Object.keys(data).sort()",
+                  "    .map(k => k + '=' + (data[k] === null || data[k] === undefined ? '' : String(data[k]))).join('&');",
+                  "let signature = CryptoJS.HmacSHA256(signed, key).toString(CryptoJS.enc.Hex);",
+                  "if (KIND === 'badSignature') signature = '0'.repeat(64);",
+                  "const body = JSON.stringify({ code: paid ? '00' : '01', desc: paid ? 'success' : 'failed', success: paid, data: data, signature: signature });",
+                  "pm.collectionVariables.set('webhookBody', body);",
+                  "if (KIND === 'paid') pm.collectionVariables.set('lastPaidWebhook', body);",
+                  "console.log('Webhook (' + KIND + ') orderCode=' + data.orderCode + ' amount=' + data.amount + ' paymentLinkId=' + data.paymentLinkId);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "console.log('Phản hồi:', pm.response.text());"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7.6 Payment - SUCCESS",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/payments/by-booking/{{bookingId}}",
+            "description": "Payment mới nhất của booking (404 cho tới khi payment-service xử lý CREATE_PAYMENT)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "poll({ url: V('base') + '/api/v1/payments/by-booking/' + V('bookingId'), method: 'GET', header: auth('customerToken') },",
+                  "     res => { if (res.code !== 200) return false; const p = res.json().data; return p.status === 'SUCCESS'; }, 30, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json().data || {};",
+                  "console.log('payment ' + p.id + ': status=' + p.status + ', amount=' + p.amount + ' ' + p.currency + ', orderCode=' + p.payosOrderCode",
+                  "    + ', paymentLinkId=' + p.gatewayTransactionId + (p.failureReason ? ', reason=' + p.failureReason : ''));",
+                  "if (p.checkoutUrl) console.log('Link PayOS (mở để xem QR, KHÔNG cần trả tiền thật):', p.checkoutUrl);",
+                  "pm.test('SUCCESS', () => { pm.expect((() => p.status === 'SUCCESS')(), 'status hiện tại: ' + p.status).to.be.true; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7.7 Kafka - sau ~60s retry, PAYMENT_SUCCEEDED nằm trong payment-events.DLT",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{kui}}/topics/{{dltTopic}}/messages?seekType=TIMESTAMP&seekTo=0::{{sinceTs}}&seekTo=1::{{sinceTs}}&seekTo=2::{{sinceTs}}&seekDirection=FORWARD&limit=100&q={{bookingId}}&filterQueryType=STRING_CONTAINS",
+            "description": "Relay của outbox đã đẩy message lên Kafka. Lọc theo bookingId, kể từ lúc tạo booking."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "// Kafka UI trả về text/event-stream: mỗi dòng 'data:{...}'; lấy các event type=MESSAGE.",
+                  "const readMsgs = text => text.split('\\n')",
+                  "    .filter(l => l.startsWith('data:'))",
+                  "    .map(l => { try { return JSON.parse(l.slice(5)); } catch (e) { return null; } })",
+                  "    .filter(e => e && e.type === 'MESSAGE').map(e => e.message);",
+                  "const parse = m => { try { return JSON.parse(m.content); } catch (e) { return {}; } };",
+                  "const typeOf = b => b.commandType || b.eventType;",
+                  "const match = m => { const b = parse(m); return typeOf(b) === 'PAYMENT_SUCCEEDED' && String(m.key) === V('bookingId') && (true); };",
+                  "const url = pm.variables.replaceIn(pm.request.url.toString());",
+                  "poll({ url: url, method: 'GET' }, res => readMsgs(res.text()).some(match), 60, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "// Kafka UI trả về text/event-stream: mỗi dòng 'data:{...}'; lấy các event type=MESSAGE.",
+                  "const readMsgs = text => text.split('\\n')",
+                  "    .filter(l => l.startsWith('data:'))",
+                  "    .map(l => { try { return JSON.parse(l.slice(5)); } catch (e) { return null; } })",
+                  "    .filter(e => e && e.type === 'MESSAGE').map(e => e.message);",
+                  "const parse = m => { try { return JSON.parse(m.content); } catch (e) { return {}; } };",
+                  "const typeOf = b => b.commandType || b.eventType;",
+                  "const match = m => { const b = parse(m); return typeOf(b) === 'PAYMENT_SUCCEEDED' && String(m.key) === V('bookingId') && (true); };",
+                  "const msgs = readMsgs(pm.response.text());",
+                  "const m = msgs.filter(match).pop();",
+                  "console.log('Message của booking này trên ' + V('dltTopic') + ':', msgs.map(x => typeOf(parse(x)) + '@p' + x.partition + '/' + x.offset).join(', '));",
+                  "pm.test('Có message PAYMENT_SUCCEEDED trong DLT trên ' + V('dltTopic') + ', key = bookingId', () => pm.expect(m, 'không thấy message (xem Kafka UI)').to.exist);",
+                  "if (m) {",
+                  "    const b = parse(m);",
+                  "    console.log('PAYMENT_SUCCEEDED trong DLT -> partition ' + m.partition + ', offset ' + m.offset + ', lúc ' + m.timestamp);",
+                  "    console.log('payload', b);",
+                  "    pm.collectionVariables.set('msgTopic', V('dltTopic'));",
+                  "    pm.collectionVariables.set('msgPartition', m.partition);",
+                  "    pm.collectionVariables.set('msgOffset', m.offset);",
+                  "    pm.test('Message có aggregateId = bookingId', () => pm.expect(String(b.aggregateId)).to.eql(V('bookingId')));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7.8 Booking vẫn PENDING (event chưa áp dụng, KHÔNG bị mất)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings/{{bookingId}}",
+            "description": "Đợi 15s: PAYMENT_SUCCEEDED đã tới nhưng listener lỗi và đang retry, booking chưa đổi."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Đợi một chút để consumer kịp xử lý (nếu có gì để xử lý).",
+                  "setTimeout(() => {}, 15000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json().data || {};",
+                  "console.log('booking ' + b.bookingCode + ': status=' + b.status + ', paidPaymentId=' + b.paidPaymentId + ', version=' + b.version);",
+                  "pm.test('Booking PENDING', () => pm.expect(b.status).to.eql('PENDING'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7.9 Tắt chaos (sự cố đã khắc phục)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings/admin/chaos/payment-events?fail=false"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7.10 Replay DLT",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings/admin/payment-events-dlt/replay"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "console.log(pm.response.json());"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7.11 Booking - CONFIRMED",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customerToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings/{{bookingId}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                  "poll({ url: V('base') + '/api/v1/bookings/' + V('bookingId'), method: 'GET', header: auth('customerToken') },",
+                  "     res => res.code === 200 && res.json().data.status === 'CONFIRMED', 30, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const V = k => pm.collectionVariables.get(k);",
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json().data || {};",
+                  "console.log('booking ' + b.bookingCode + ': status=' + b.status + ', paidPaymentId=' + b.paidPaymentId + ', version=' + b.version);",
+                  "pm.test('Booking CONFIRMED', () => pm.expect(b.status).to.eql('CONFIRMED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7.12 Dừng replay DLT",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/bookings/admin/payment-events-dlt/stop"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Cần BOOKING_DEMO_CHAOS_ENABLED=true (docker-compose đã bật). Lỗi kỹ thuật: retry backoff 1s, 2s, 4s... tối đa 60s, rồi đẩy sang payment-events.DLT thay vì bỏ qua; replay an toàn vì handler idempotent theo trạng thái booking. Bước 7.7 chờ tối đa ~90s."
+    },
+    {
+      "name": "8. CQRS: movie-service → Kafka → Elasticsearch (search-service)",
+      "item": [
+        {
+          "name": "8.1 Admin tạo phim (ghi outbox movie-events)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base}}/api/v1/movies",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Kafka ES Test {{runTag}}\",\n  \"originalTitle\": \"Kafka Elasticsearch Flow\",\n  \"description\": \"Phim tạo bởi Postman để test luồng movie-events -> search-service.\",\n  \"durationMinutes\": 120,\n  \"releaseDate\": \"2026-11-01\",\n  \"ageRating\": \"T13\",\n  \"language\": \"Vietnamese\",\n  \"country\": \"Vietnam\",\n  \"posterUrl\": \"https://example.com/posters/kafka-es.jpg\",\n  \"status\": \"NOW_SHOWING\",\n  \"genreIds\": [\"{{genreId}}\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sinceTs', Date.now() - 2000);",
+                  "pm.collectionVariables.set('runTag', Date.now().toString().slice(-6));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const d = pm.response.json().data;",
+                  "pm.collectionVariables.set('movieId', d.id);",
+                  "pm.collectionVariables.set('movieTitle', d.title);",
+                  "console.log('movieId =', d.id, '| updatedAt =', d.updatedAt);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "8.2 Search API tìm thấy phim mới (đọc từ Elasticsearch)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/search/movies?q={{runTag}}",
+            "description": "Đi qua Gateway → search-service → Elasticsearch, giống FE gọi."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~10 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "",
+                  "poll({ url: V('base') + '/api/v1/search/movies?q=' + V('runTag') + '', method: 'GET' }, res => (res.json().data.items || []).some(i => i.id === V('movieId')), 10, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const hit = pm.response.json().data.items.find(i => i.id === pm.collectionVariables.get('movieId'));",
+                  "pm.test('Kết quả có phim vừa tạo', () => pm.expect(hit).to.exist);",
+                  "if (hit) console.log(hit.title, hit.highlight);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "8.3 Admin xoá mềm phim",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{base}}/api/v1/movies/{{movieId}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sinceTs', Date.now() - 2000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "8.4 Search API không còn phim",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base}}/api/v1/search/movies?q={{runTag}}",
+            "description": "Đi qua Gateway → search-service → Elasticsearch, giống FE gọi."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Chờ tới khi điều kiện đúng (tối đa ~10 lần x 1.5s) rồi mới gửi request chính.",
+                  "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                  "    let good = false;",
+                  "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                  "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                  "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                  "});",
+                  "const V = k => pm.collectionVariables.get(k) || pm.environment.get(k);",
+                  "",
+                  "poll({ url: V('base') + '/api/v1/search/movies?q=' + V('runTag') + '', method: 'GET' }, res => !(res.json().data.items || []).some(i => i.id === V('movieId')), 10, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Không còn trong kết quả', () => pm.expect(pm.response.json().data.items.map(i => i.id)).to.not.include(pm.collectionVariables.get('movieId')));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Ghi ở movie-service (PostgreSQL), đọc ở search-service (Elasticsearch); đồng bộ bất đồng bộ qua topic movie-events."
+    },
+    {
+      "name": "9. (Thủ công) Sự cố hạ tầng - cần docker stop/start",
+      "item": [
+        {
+          "name": "9.1 Circuit breaker: showtime-service chết",
+          "item": [
+            {
+              "name": "9.1.1 [docker compose stop showtime-service] Đặt vé liên tục → 503 + Retry-After",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{customerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Idempotency-Key",
+                    "value": "{{$guid}}"
+                  }
+                ],
+                "url": "{{base}}/api/v1/bookings",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"showtimeId\": \"{{showtimeId}}\",\n  \"seats\": [\n    { \"showtimeSeatId\": \"{{$guid}}\" }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Trước khi chạy: docker compose stop showtime-service. booking gọi showtime qua Retry → CircuitBreaker → Bulkhead → Feign. Pre-request gửi 5 lần (cách 1.2s vì rate limit). Sau >=5 lần gọi lỗi ≥50%, breaker 'showtime' OPEN: request bị từ chối ngay, không đợi timeout."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const V = k => pm.collectionVariables.get(k);",
+                      "const burst = (makeReq, count, gapMs, done, log) => {",
+                      "    const step = i => {",
+                      "        if (i >= count) return done();",
+                      "        pm.sendRequest(makeReq(i), (err, res) => {",
+                      "            log(i, err, res);",
+                      "            setTimeout(() => step(i + 1), gapMs);",
+                      "        });",
+                      "    };",
+                      "    step(0);",
+                      "};",
+                      "",
+                      "const codes = [];",
+                      "burst(() => ({ url: V('base') + '/api/v1/bookings', method: 'POST',",
+                      "               header: [{ key: 'Authorization', value: 'Bearer ' + V('customerToken') }, { key: 'Content-Type', value: 'application/json' },",
+                      "                        { key: 'Idempotency-Key', value: pm.variables.replaceIn('{{$guid}}') }],",
+                      "               body: { mode: 'raw', raw: JSON.stringify({ showtimeId: V('showtimeId'), seats: [{ showtimeSeatId: pm.variables.replaceIn('{{$guid}}') }] }) } }),",
+                      "      5, 1200, () => { console.log('Pre-request:', codes.join(', ')); setTimeout(() => {}, 1200); },",
+                      "      (i, err, res) => codes.push('#' + (i + 1) + '=' + (res ? res.code + ' (' + res.responseTime + 'ms)' : err)));"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('HTTP 503', () => pm.response.to.have.status(503));",
+                      "pm.test('Retry-After: 20', () => pm.expect(pm.response.headers.get('Retry-After')).to.eql('20'));",
+                      "pm.test('Trả lời nhanh (breaker OPEN, không chờ timeout)', () => pm.expect(pm.response.responseTime).to.be.below(1500));",
+                      "console.log(pm.response.json().message, '|', pm.response.responseTime + 'ms');"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "9.1.2 Prometheus - breaker 'showtime' đang OPEN",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{prom}}/api/v1/query?query=resilience4j_circuitbreaker_state%7Bapplication%3D%22booking-service%22%2Cname%3D%22showtime%22%2Cstate%3D%22open%22%7D",
+                "description": "Metric Resilience4j xuất qua /actuator/prometheus (Prometheus scrape 15s một lần). Grafana: http://localhost:3001."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                      "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                      "    let good = false;",
+                      "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                      "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                      "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                      "});",
+                      "const V = k => pm.collectionVariables.get(k);",
+                      "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                      "",
+                      "poll({ url: pm.variables.replaceIn(pm.request.url.toString()), method: 'GET' },",
+                      "     res => (res.json().data.result || []).some(r => r.value[1] === '1'), 15, () => {});"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                      "const r = pm.response.json().data.result || [];",
+                      "pm.test('state=open = 1', () => pm.expect(r.some(x => x.value[1] === '1')).to.be.true);",
+                      "r.forEach(x => console.log(x.metric.instance, 'open =', x.value[1]));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "9.1.3 [docker compose start showtime-service, đợi ~30s] Breaker HALF_OPEN → CLOSED, đặt vé lại được",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{prom}}/api/v1/query?query=resilience4j_circuitbreaker_state%7Bapplication%3D%22booking-service%22%2Cname%3D%22showtime%22%7D",
+                "description": "OPEN 20s → HALF_OPEN, 3 lần thử thành công → CLOSED. Sau khi bật lại showtime, chạy lại folder 4 để thấy đặt vé bình thường."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                      "(pm.response.json().data.result || []).filter(x => x.value[1] === '1')",
+                      "    .forEach(x => console.log('Trạng thái hiện tại:', x.metric.state));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "9.2 Gateway: service chết → 503 + Retry-After",
+          "item": [
+            {
+              "name": "9.2.1 [docker compose stop payment-service] Gọi payment qua gateway → 503",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{customerToken}}"
+                  }
+                ],
+                "url": "{{base}}/api/v1/payments/by-booking/{{bookingId}}",
+                "description": "Eureka không còn instance: gateway trả JSON 503 + Retry-After (frontend biết đợi rồi thử lại). Xong: docker compose start payment-service."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('HTTP 503', () => pm.response.to.have.status(503));",
+                      "pm.test('Có Retry-After', () => pm.expect(pm.response.headers.get('Retry-After')).to.exist);",
+                      "console.log(pm.response.text());"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "9.3 Kafka chết → outbox giữ lệnh → gửi bù",
+          "item": [
+            {
+              "name": "9.3.1 [docker compose stop kafka] Lấy 1 ghế trống",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{base}}/api/v1/showtimes/{{showtimeId}}/seats",
+                "description": "Chọn ghế AVAILABLE đầu tiên. Mỗi kịch bản dùng 1 ghế; hết ghế thì đổi biến showtimeId."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                      "const free = (pm.response.json().data || []).filter(s => s.status === 'AVAILABLE');",
+                      "pm.test('Còn ghế trống', () => pm.expect(free.length).to.be.above(0));",
+                      "if (free[0]) {",
+                      "    pm.collectionVariables.set('seatId', free[0].showtimeSeatId);",
+                      "    console.log('Ghế chọn:', free[0].showtimeSeatId, free[0].seatLabel || free[0].label || '', '| còn trống:', free.length);",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "9.3.2 Tạo booking khi Kafka tắt → vẫn 201",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{customerToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Idempotency-Key",
+                    "value": "{{idemKey}}"
+                  }
+                ],
+                "url": "{{base}}/api/v1/bookings",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"showtimeId\": \"{{showtimeId}}\",\n  \"seats\": [\n    { \"showtimeSeatId\": \"{{seatId}}\" }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "booking-service giữ ghế ở showtime (HTTP), lưu booking + dòng CREATE_PAYMENT vào outbox_messages trong CÙNG một transaction. Kafka không nằm trên đường HTTP."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.collectionVariables.set('idemKey', pm.variables.replaceIn('{{$guid}}'));",
+                      "// Mốc thời gian để đọc message trên Kafka UI (seek theo timestamp).",
+                      "pm.collectionVariables.set('sinceTs', Date.now() - 2000);"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                      "const b = pm.response.json().data;",
+                      "pm.collectionVariables.set('bookingId', b.id);",
+                      "pm.collectionVariables.set('bookingCode', b.bookingCode);",
+                      "pm.test('Booking PENDING, có hạn thanh toán', () => {",
+                      "    pm.expect(b.status).to.eql('PENDING');",
+                      "    pm.expect(b.expiresAt).to.be.a('string');",
+                      "});",
+                      "console.log('bookingId =', b.id, '| code =', b.bookingCode, '| total =', b.totalAmount, b.currency, '| hết hạn lúc', b.expiresAt);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "9.3.3 Outbox - CREATE_PAYMENT nằm chờ (PENDING + lỗi)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": "{{base}}/api/v1/bookings/admin/outbox",
+                "description": "API vận hành outbox (ADMIN / STAFF): số dòng PENDING / FAILED, dòng PENDING cũ nhất và lỗi gần nhất."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                      "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                      "    let good = false;",
+                      "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                      "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                      "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                      "});",
+                      "const V = k => pm.collectionVariables.get(k);",
+                      "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                      "poll({ url: pm.variables.replaceIn(pm.request.url.toString()), method: 'GET', header: auth('adminToken') },",
+                      "     res => { const d = res.json().data || {}; return d.pending > 0 && !!d.oldestPendingLastError; }, 20, () => {});"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                      "const d = pm.response.json().data || {};",
+                      "console.log('Outbox: pending=' + d.pending + (d.processing !== undefined ? ', processing=' + d.processing : '')",
+                      "    + ', failed=' + d.failed + ', oldestPendingAt=' + d.oldestPendingAt",
+                      "    + (d.oldestPendingLastError ? ', lastError=' + d.oldestPendingLastError : '')",
+                      "    + (d.relayPausedUntil ? ', relayPausedUntil=' + d.relayPausedUntil : ''));",
+                      "",
+                      "pm.test('CREATE_PAYMENT nằm chờ trong outbox (pending > 0)', () => pm.expect(d.pending).to.be.above(0));",
+                      "pm.test('Có lỗi gửi gần nhất (last_error)', () => pm.expect(d.oldestPendingLastError || '').to.not.be.empty);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "9.3.4 [docker compose start kafka] Outbox đã gửi bù",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": "{{base}}/api/v1/bookings/admin/outbox",
+                "description": "API vận hành outbox (ADMIN / STAFF): số dòng PENDING / FAILED, dòng PENDING cũ nhất và lỗi gần nhất."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                      "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                      "    let good = false;",
+                      "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                      "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                      "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                      "});",
+                      "const V = k => pm.collectionVariables.get(k);",
+                      "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                      "poll({ url: pm.variables.replaceIn(pm.request.url.toString()), method: 'GET', header: auth('adminToken') },",
+                      "     res => { const d = res.json().data || {}; return d.pending === 0; }, 60, () => {});"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                      "const d = pm.response.json().data || {};",
+                      "console.log('Outbox: pending=' + d.pending + (d.processing !== undefined ? ', processing=' + d.processing : '')",
+                      "    + ', failed=' + d.failed + ', oldestPendingAt=' + d.oldestPendingAt",
+                      "    + (d.oldestPendingLastError ? ', lastError=' + d.oldestPendingLastError : '')",
+                      "    + (d.relayPausedUntil ? ', relayPausedUntil=' + d.relayPausedUntil : ''));",
+                      "pm.test('pending về 0: message đã lên Kafka', () => pm.expect(d.pending).to.eql(0));"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "9.3.5 Payment - link PayOS được tạo",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{customerToken}}"
+                  }
+                ],
+                "url": "{{base}}/api/v1/payments/by-booking/{{bookingId}}",
+                "description": "Payment mới nhất của booking (404 cho tới khi payment-service xử lý CREATE_PAYMENT)."
+              },
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "// Chờ tới khi điều kiện đúng (tối đa N lần x 1.5s) rồi mới gửi request chính.",
+                      "const poll = (req, ok, left, done) => pm.sendRequest(req, (err, res) => {",
+                      "    let good = false;",
+                      "    try { good = !err && ok(res); } catch (e) { good = false; }",
+                      "    if (good || left <= 0) { if (!good) console.warn('Hết thời gian chờ: ' + pm.info.requestName); return done(); }",
+                      "    setTimeout(() => poll(req, ok, left - 1, done), 1500);",
+                      "});",
+                      "const V = k => pm.collectionVariables.get(k);",
+                      "const auth = t => [{ key: 'Authorization', value: 'Bearer ' + V(t) }];",
+                      "poll({ url: V('base') + '/api/v1/payments/by-booking/' + V('bookingId'), method: 'GET', header: auth('customerToken') },",
+                      "     res => { if (res.code !== 200) return false; const p = res.json().data; return p.status === 'PENDING' && !!p.checkoutUrl; }, 40, () => {});"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const V = k => pm.collectionVariables.get(k);",
+                      "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                      "const p = pm.response.json().data || {};",
+                      "console.log('payment ' + p.id + ': status=' + p.status + ', amount=' + p.amount + ' ' + p.currency + ', orderCode=' + p.payosOrderCode",
+                      "    + ', paymentLinkId=' + p.gatewayTransactionId + (p.failureReason ? ', reason=' + p.failureReason : ''));",
+                      "if (p.checkoutUrl) console.log('Link PayOS (mở để xem QR, KHÔNG cần trả tiền thật):', p.checkoutUrl);",
+                      "pm.test('link PayOS được tạo sau khi Kafka sống lại', () => { pm.expect((() => p.status === 'PENDING' && !!p.checkoutUrl)(), 'status hiện tại: ' + p.status).to.be.true; });",
+                      "",
+                      "pm.collectionVariables.set('paymentId', p.id);",
+                      "pm.collectionVariables.set('orderCode', p.payosOrderCode);",
+                      "pm.collectionVariables.set('paymentLinkId', p.gatewayTransactionId);",
+                      "pm.collectionVariables.set('payAmount', Math.round(Number(p.amount)));"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "description": "Kafka không nằm trên đường HTTP: người dùng vẫn đặt vé được, lệnh nằm trong outbox và được gửi khi Kafka sống lại."
+        }
+      ],
+      "description": "Chạy từng request bằng tay (không dùng Runner). Làm theo chỉ dẫn [docker ...] trong tên request."
+    }
+  ],
+  "variable": [
+    {
+      "key": "base",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "kc",
+      "value": "http://localhost:8180/realms/mss301/protocol/openid-connect/token"
+    },
+    {
+      "key": "kui",
+      "value": "http://localhost:8090/api/clusters/local"
+    },
+    {
+      "key": "zipkin",
+      "value": "http://localhost:9411"
+    },
+    {
+      "key": "prom",
+      "value": "http://localhost:9090"
+    },
+    {
+      "key": "showtimeId",
+      "value": "50000000-0000-0000-0000-000000000001"
+    },
+    {
+      "key": "genreId",
+      "value": "21000000-0000-0000-0000-000000000005"
+    },
+    {
+      "key": "payosChecksumKey",
+      "value": ""
+    },
+    {
+      "key": "cmdTopic",
+      "value": "payment-commands"
+    },
+    {
+      "key": "evtTopic",
+      "value": "payment-events"
+    },
+    {
+      "key": "dltTopic",
+      "value": "payment-events.DLT"
+    },
+    {
+      "key": "paymentGroup",
+      "value": "payment-service"
+    },
+    {
+      "key": "bookingGroup",
+      "value": "booking-service"
+    }
+  ]
+}
