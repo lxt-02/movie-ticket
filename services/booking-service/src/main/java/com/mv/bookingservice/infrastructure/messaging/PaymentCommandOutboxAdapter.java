@@ -1,9 +1,9 @@
 package com.mv.bookingservice.infrastructure.messaging;
 
-import com.mv.bookingservice.application.port.out.OutboxPort;
+import com.mv.bookingservice.application.port.out.OutboxMessagePort;
 import com.mv.bookingservice.application.port.out.PaymentCommandPort;
 import com.mv.bookingservice.domain.model.booking.aggregate.Booking;
-import com.mv.bookingservice.domain.model.outbox.OutboxEvent;
+import com.mv.bookingservice.domain.model.outbox.OutboxMessage;
 import com.mv.bookingservice.infrastructure.config.JsonCodec;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -14,7 +14,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Writes payment commands into outbox_events. Message format (topic payment-commands, key = bookingId):
+ * Writes payment commands into outbox_messages (aggregateType BOOKING). Message format (topic payment-commands, key = bookingId):
  * <pre>
  * { commandId, aggregateId, commandType: "CREATE_PAYMENT", occurredAt,
  *   payload: { bookingId, userId, amount, currency, provider, description, expiredAt, idempotencyKey } }
@@ -29,9 +29,11 @@ public class PaymentCommandOutboxAdapter implements PaymentCommandPort {
 
     public static final String CREATE_PAYMENT = "CREATE_PAYMENT";
     public static final String CANCEL_PAYMENT = "CANCEL_PAYMENT";
+    public static final String AGGREGATE_TYPE = "BOOKING";
     private static final String PROVIDER = "PAYOS";
 
-    private final OutboxPort outboxPort;
+    private final OutboxMessagePort outboxMessagePort;
+    private final BookingKafkaProperties properties;
     private final JsonCodec json;
 
     @Override
@@ -69,12 +71,12 @@ public class PaymentCommandOutboxAdapter implements PaymentCommandPort {
         command.put("occurredAt", now);
         command.put("payload", payload);
 
-        outboxPort.save(OutboxEvent.builder()
-                .id(commandId)
-                .aggregateId(booking.getId())
-                .eventType(commandType)
-                .payload(json.write(command))
-                .createdAt(now)
-                .build());
+        outboxMessagePort.save(OutboxMessage.pending(
+                AGGREGATE_TYPE,
+                booking.getId(),
+                commandType,
+                properties.paymentCommands(),
+                booking.getId().toString(),
+                json.write(command)));
     }
 }
