@@ -119,6 +119,7 @@ public class CommonExceptionHandler {
     @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
     public ResponseEntity<Map<String, Object>> optimisticLock(ObjectOptimisticLockingFailureException ex,
                                                               HttpServletRequest request) {
+        log.warn("Optimistic lock conflict on {} {}: {}", request.getMethod(), request.getRequestURI(), ex.getMessage());
         return bad(HttpStatus.CONFLICT, "Dữ liệu vừa được thay đổi bởi thao tác khác, vui lòng tải lại và thử lại",
                 request, null);
     }
