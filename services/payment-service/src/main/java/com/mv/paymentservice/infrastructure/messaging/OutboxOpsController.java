@@ -1,8 +1,8 @@
 package com.mv.paymentservice.infrastructure.messaging;
 
 import com.mv.paymentservice.api.dto.response.ApiResponse;
-import com.mv.paymentservice.infrastructure.persistence.entity.OutboxMessageEntity;
-import com.mv.paymentservice.infrastructure.persistence.entity.OutboxStatus;
+import com.mv.paymentservice.infrastructure.persistence.entity.OutboxMessageInfraEntity;
+import com.mv.paymentservice.domain.model.outbox.OutboxMessageStatus;
 import com.mv.paymentservice.infrastructure.persistence.repository.OutboxMessageJpaRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -21,7 +21,7 @@ import java.util.Map;
  * <ul>
  *     <li>GET  /api/v1/payments/admin/outbox: backlog (PENDING / PROCESSING), FAILED rows with their error</li>
  *     <li>POST /api/v1/payments/admin/outbox/requeue-failed: FAILED -> PENDING once the cause is fixed.
- *     Safe: booking-service skips an event it already applied (inbox by eventId).</li>
+ *     Safe: booking-service ignores an event whose change is already applied (state-guarded).</li>
  * </ul>
  */
 @Slf4j
@@ -49,17 +49,17 @@ public class OutboxOpsController {
 
     private Map<String, Object> view() {
         Map<String, Object> view = new LinkedHashMap<>();
-        view.put("pending", repository.countByStatus(OutboxStatus.PENDING));
-        view.put("processing", repository.countByStatus(OutboxStatus.PROCESSING));
-        view.put("failed", repository.countByStatus(OutboxStatus.FAILED));
-        view.put("oldestPendingAt", repository.oldestCreatedAt(OutboxStatus.PENDING));
-        List<Map<String, Object>> failed = repository.findTop20ByStatusOrderByCreatedAtAsc(OutboxStatus.FAILED)
+        view.put("pending", repository.countByStatus(OutboxMessageStatus.PENDING.name()));
+        view.put("processing", repository.countByStatus(OutboxMessageStatus.PROCESSING.name()));
+        view.put("failed", repository.countByStatus(OutboxMessageStatus.FAILED.name()));
+        view.put("oldestPendingAt", repository.oldestCreatedAt(OutboxMessageStatus.PENDING.name()));
+        List<Map<String, Object>> failed = repository.findTop20ByStatusOrderByCreatedAtAsc(OutboxMessageStatus.FAILED.name())
                 .stream().map(OutboxOpsController::row).toList();
         view.put("failedRows", failed);
         return view;
     }
 
-    private static Map<String, Object> row(OutboxMessageEntity m) {
+    private static Map<String, Object> row(OutboxMessageInfraEntity m) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("id", m.getId());
         row.put("bookingId", m.getAggregateId());

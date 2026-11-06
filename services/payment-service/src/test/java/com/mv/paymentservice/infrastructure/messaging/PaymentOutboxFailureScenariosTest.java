@@ -5,8 +5,7 @@ import com.mv.paymentservice.application.port.in.CreatePaymentUseCase;
 import com.mv.paymentservice.application.port.in.RecordPaymentCreationFailureUseCase;
 import com.mv.paymentservice.infrastructure.config.JsonCodec;
 import com.mv.paymentservice.infrastructure.config.KafkaConfig;
-import com.mv.paymentservice.infrastructure.persistence.entity.OutboxMessageEntity;
-import com.mv.paymentservice.infrastructure.persistence.entity.OutboxStatus;
+import com.mv.paymentservice.infrastructure.persistence.entity.OutboxMessageInfraEntity;
 import com.mv.paymentservice.infrastructure.persistence.repository.OutboxMessageJpaRepository;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -109,7 +108,7 @@ class PaymentOutboxFailureScenariosTest {
             assertThat(r.topic()).isEqualTo(TOPIC);
             assertThat(r.key()).isEqualTo(booking.toString());
         });
-        assertThat(repository.findById(id).orElseThrow().getStatus()).isEqualTo(OutboxStatus.PUBLISHED);
+        assertThat(repository.findById(id).orElseThrow().getStatus()).isEqualTo("PUBLISHED");
     }
 
     @Test
@@ -130,14 +129,14 @@ class PaymentOutboxFailureScenariosTest {
         } finally {
             realProducer.destroy();
         }
-        OutboxMessageEntity attempted = repository.findById(first).orElseThrow();
-        assertThat(attempted.getStatus()).isEqualTo(OutboxStatus.PENDING);
+        OutboxMessageInfraEntity attempted = repository.findById(first).orElseThrow();
+        assertThat(attempted.getStatus()).isEqualTo("PENDING");
         assertThat(attempted.getRetryCount()).isEqualTo(1);
         assertThat(attempted.getLastError()).contains("TimeoutException");
         assertThat(attempted.getNextRetryAt()).isEqualTo(clock.instant().plusSeconds(5));
         assertThat(List.of(second, third)).allSatisfy(id -> {
-            OutboxMessageEntity m = repository.findById(id).orElseThrow();
-            assertThat(m.getStatus()).isEqualTo(OutboxStatus.PENDING);
+            OutboxMessageInfraEntity m = repository.findById(id).orElseThrow();
+            assertThat(m.getStatus()).isEqualTo("PENDING");
             assertThat(m.getRetryCount()).isZero();
         });
     }
@@ -151,18 +150,18 @@ class PaymentOutboxFailureScenariosTest {
         OutboxRelay relay = relay(down);
         for (int attempt = 1; attempt <= 15; attempt++) {
             relay.relay();
-            OutboxMessageEntity m = repository.findById(id).orElseThrow();
-            assertThat(m.getStatus()).isEqualTo(OutboxStatus.PENDING);
+            OutboxMessageInfraEntity m = repository.findById(id).orElseThrow();
+            assertThat(m.getStatus()).isEqualTo("PENDING");
             clock.set(m.getNextRetryAt());
         }
-        OutboxMessageEntity afterOutage = repository.findById(id).orElseThrow();
+        OutboxMessageInfraEntity afterOutage = repository.findById(id).orElseThrow();
         assertThat(afterOutage.getRetryCount()).isEqualTo(15);
         assertThat(relay.backOff(15)).isEqualTo(Duration.ofMinutes(5));
 
         MockProducer<String, String> producer = mockProducer(new StringSerializer());
         relay(new KafkaTemplate<>(() -> producer)).relay();
         assertThat(producer.history()).hasSize(1);
-        assertThat(repository.findById(id).orElseThrow().getStatus()).isEqualTo(OutboxStatus.PUBLISHED);
+        assertThat(repository.findById(id).orElseThrow().getStatus()).isEqualTo("PUBLISHED");
     }
 
     @Test
@@ -185,11 +184,11 @@ class PaymentOutboxFailureScenariosTest {
 
         relay.relay();
 
-        OutboxMessageEntity failed = repository.findById(deniedId).orElseThrow();
-        assertThat(failed.getStatus()).isEqualTo(OutboxStatus.FAILED);
+        OutboxMessageInfraEntity failed = repository.findById(deniedId).orElseThrow();
+        assertThat(failed.getStatus()).isEqualTo("FAILED");
         assertThat(failed.getRetryCount()).isEqualTo(1);
         assertThat(failed.getLastError()).startsWith("TopicAuthorizationException");
-        assertThat(repository.findById(okId).orElseThrow().getStatus()).isEqualTo(OutboxStatus.PUBLISHED);
+        assertThat(repository.findById(okId).orElseThrow().getStatus()).isEqualTo("PUBLISHED");
 
         relay.relay();
         assertThat(producer.history()).hasSize(1); // FAILED is not retried automatically
@@ -198,7 +197,7 @@ class PaymentOutboxFailureScenariosTest {
         transactionTemplate.executeWithoutResult(s -> assertThat(repository.requeueFailed()).isEqualTo(1));
         relay.relay();
         assertThat(producer.history()).hasSize(2);
-        assertThat(repository.findById(deniedId).orElseThrow().getStatus()).isEqualTo(OutboxStatus.PUBLISHED);
+        assertThat(repository.findById(deniedId).orElseThrow().getStatus()).isEqualTo("PUBLISHED");
     }
 
     @Test
@@ -209,8 +208,8 @@ class PaymentOutboxFailureScenariosTest {
             throw new SerializationException("Cannot serialize value for " + topic);
         };
         relay(new KafkaTemplate<>(() -> mockProducer(broken))).relay();
-        OutboxMessageEntity m = repository.findById(id).orElseThrow();
-        assertThat(m.getStatus()).isEqualTo(OutboxStatus.FAILED);
+        OutboxMessageInfraEntity m = repository.findById(id).orElseThrow();
+        assertThat(m.getStatus()).isEqualTo("FAILED");
         assertThat(m.getLastError()).startsWith("SerializationException");
     }
 
@@ -252,11 +251,11 @@ class PaymentOutboxFailureScenariosTest {
 
     private UUID message(UUID bookingId, int secondsAfterStart) {
         UUID id = UUID.randomUUID();
-        repository.save(OutboxMessageEntity.builder()
+        repository.save(OutboxMessageInfraEntity.builder()
                 .id(id).aggregateType("BOOKING").aggregateId(bookingId)
                 .eventType("PAYMENT_SUCCEEDED").topic(TOPIC).messageKey(bookingId.toString())
                 .payload("{\"eventId\":\"" + id + "\"}")
-                .status(OutboxStatus.PENDING).retryCount(0)
+                .status("PENDING").retryCount(0)
                 .createdAt(clock.instant().minusSeconds(60).plusSeconds(secondsAfterStart))
                 .build());
         return id;

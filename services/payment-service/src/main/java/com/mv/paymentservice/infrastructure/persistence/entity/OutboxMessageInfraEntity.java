@@ -2,10 +2,10 @@ package com.mv.paymentservice.infrastructure.persistence.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.time.Instant;
+import java.util.UUID;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -14,9 +14,7 @@ import lombok.Setter;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
-import java.time.Instant;
-import java.util.UUID;
-
+/** Row of outbox_messages. {@code status} holds an OutboxMessageStatus name. */
 @Entity
 @Table(name = "outbox_messages")
 @Getter
@@ -24,9 +22,10 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class OutboxMessageEntity {
+public class OutboxMessageInfraEntity {
 
     @Id
+    @Column(name = "id", nullable = false)
     private UUID id;
 
     @Column(name = "aggregate_type", nullable = false, length = 100)
@@ -48,10 +47,8 @@ public class OutboxMessageEntity {
     @Column(name = "payload", nullable = false)
     private String payload;
 
-    @Enumerated(EnumType.STRING)
-    @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(name = "status", nullable = false, length = 30)
-    private OutboxStatus status;
+    private String status;
 
     @Column(name = "retry_count", nullable = false)
     private int retryCount;
