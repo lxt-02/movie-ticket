@@ -2,7 +2,6 @@ package com.mv.bookingservice.application.service;
 
 import com.mv.bookingservice.application.command.PaymentEventCommand;
 import com.mv.bookingservice.application.exception.SeatHoldRejectedException;
-import com.mv.bookingservice.application.port.out.InboxPort;
 import com.mv.bookingservice.application.port.out.LoadBookingPort;
 import com.mv.bookingservice.application.port.out.SaveBookingPort;
 import com.mv.bookingservice.application.port.out.ShowtimeClientPort;
@@ -30,8 +29,6 @@ import static org.mockito.Mockito.when;
 class HandlePaymentEventServiceTest {
 
     @Mock
-    private InboxPort inboxPort;
-    @Mock
     private LoadBookingPort loadBookingPort;
     @Mock
     private SaveBookingPort saveBookingPort;
@@ -43,7 +40,7 @@ class HandlePaymentEventServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new HandlePaymentEventService(inboxPort, loadBookingPort, saveBookingPort, showtimeClientPort,
+        service = new HandlePaymentEventService(loadBookingPort, saveBookingPort, showtimeClientPort,
                 new SeatConfirmation(showtimeClientPort));
         booking = Booking.builder()
                 .id(UUID.randomUUID())
@@ -71,7 +68,6 @@ class HandlePaymentEventServiceTest {
     @Test
     void paymentSucceededConfirmsSeatsAndBooking() {
         PaymentEventCommand event = event(PaymentEventCommand.PAYMENT_SUCCEEDED, new BigDecimal("150000"));
-        when(inboxPort.isProcessed(event.getEventId())).thenReturn(false);
         when(loadBookingPort.findById(booking.getId())).thenReturn(Optional.of(booking));
 
         service.handle(event);
@@ -80,13 +76,11 @@ class HandlePaymentEventServiceTest {
         assertEquals(BookingStatus.CONFIRMED, booking.getStatus());
         assertEquals(paymentId, booking.getPaidPaymentId());
         verify(saveBookingPort).save(booking);
-        verify(inboxPort).markProcessed(event.getEventId(), PaymentEventCommand.PAYMENT_SUCCEEDED);
     }
 
     @Test
     void showtimeFailureKeepsBookingConfirmingForTheRetryJob() {
         PaymentEventCommand event = event(PaymentEventCommand.PAYMENT_SUCCEEDED, new BigDecimal("150000"));
-        when(inboxPort.isProcessed(event.getEventId())).thenReturn(false);
         when(loadBookingPort.findById(booking.getId())).thenReturn(Optional.of(booking));
         when(showtimeClientPort.confirmHold(booking.getHoldId())).thenThrow(new RuntimeException("showtime down"));
 
@@ -95,13 +89,11 @@ class HandlePaymentEventServiceTest {
         assertEquals(BookingStatus.CONFIRMING, booking.getStatus());
         assertEquals(paymentId, booking.getPaidPaymentId());
         verify(saveBookingPort).save(booking);
-        verify(inboxPort).markProcessed(event.getEventId(), PaymentEventCommand.PAYMENT_SUCCEEDED);
     }
 
     @Test
     void seatsRejectedByShowtimeCancelBooking() {
         PaymentEventCommand event = event(PaymentEventCommand.PAYMENT_SUCCEEDED, new BigDecimal("150000"));
-        when(inboxPort.isProcessed(event.getEventId())).thenReturn(false);
         when(loadBookingPort.findById(booking.getId())).thenReturn(Optional.of(booking));
         when(showtimeClientPort.confirmHold(booking.getHoldId()))
                 .thenThrow(new SeatHoldRejectedException("hold expired"));
@@ -111,14 +103,12 @@ class HandlePaymentEventServiceTest {
         assertEquals(BookingStatus.CANCELLED, booking.getStatus());
         assertEquals(paymentId, booking.getPaidPaymentId());
         verify(saveBookingPort).save(booking);
-        verify(inboxPort).markProcessed(event.getEventId(), PaymentEventCommand.PAYMENT_SUCCEEDED);
     }
 
     @Test
     void paymentForCancelledBookingDoesNotChangeIt() {
         booking.setStatus(BookingStatus.CANCELLED);
         PaymentEventCommand event = event(PaymentEventCommand.PAYMENT_SUCCEEDED, new BigDecimal("150000"));
-        when(inboxPort.isProcessed(event.getEventId())).thenReturn(false);
         when(loadBookingPort.findById(booking.getId())).thenReturn(Optional.of(booking));
 
         service.handle(event);
@@ -133,7 +123,6 @@ class HandlePaymentEventServiceTest {
         booking.setExpiresAt(Instant.now().minusSeconds(30));
         PaymentEventCommand event = event(PaymentEventCommand.PAYMENT_SUCCEEDED, new BigDecimal("150000"));
         event.setPaidAt(Instant.now().minusSeconds(60));
-        when(inboxPort.isProcessed(event.getEventId())).thenReturn(false);
         when(loadBookingPort.findById(booking.getId())).thenReturn(Optional.of(booking));
 
         service.handle(event);
@@ -146,7 +135,6 @@ class HandlePaymentEventServiceTest {
         booking.setExpiresAt(Instant.now().minusSeconds(60));
         PaymentEventCommand event = event(PaymentEventCommand.PAYMENT_SUCCEEDED, new BigDecimal("150000"));
         event.setPaidAt(Instant.now().minusSeconds(10));
-        when(inboxPort.isProcessed(event.getEventId())).thenReturn(false);
         when(loadBookingPort.findById(booking.getId())).thenReturn(Optional.of(booking));
 
         service.handle(event);
@@ -159,7 +147,6 @@ class HandlePaymentEventServiceTest {
     void providerErrorKeepsBookingPendingSoUserCanPayAgain() {
         PaymentEventCommand event = event(PaymentEventCommand.PAYMENT_CREATE_FAILED, new BigDecimal("150000"));
         event.setReasonCode(PaymentEventCommand.REASON_PROVIDER_ERROR);
-        when(inboxPort.isProcessed(event.getEventId())).thenReturn(false);
         when(loadBookingPort.findById(booking.getId())).thenReturn(Optional.of(booking));
 
         service.handle(event);
@@ -170,20 +157,22 @@ class HandlePaymentEventServiceTest {
     }
 
     @Test
-    void alreadyProcessedEventIsSkipped() {
+    void redeliveredSucceededEventOnConfirmedBookingChangesNothing() {
+        // No inbox: a redelivered PAYMENT_SUCCEEDED is harmless because the booking is already CONFIRMED.
         PaymentEventCommand event = event(PaymentEventCommand.PAYMENT_SUCCEEDED, new BigDecimal("150000"));
-        when(inboxPort.isProcessed(event.getEventId())).thenReturn(true);
+        booking.confirm(paymentId);
+        when(loadBookingPort.findById(booking.getId())).thenReturn(Optional.of(booking));
 
         service.handle(event);
 
-        verify(loadBookingPort, never()).findById(any());
+        assertEquals(BookingStatus.CONFIRMED, booking.getStatus());
         verify(showtimeClientPort, never()).confirmHold(any());
+        verify(saveBookingPort, never()).save(any());
     }
 
     @Test
     void amountMismatchDoesNotConfirm() {
         PaymentEventCommand event = event(PaymentEventCommand.PAYMENT_SUCCEEDED, new BigDecimal("1000"));
-        when(inboxPort.isProcessed(event.getEventId())).thenReturn(false);
         when(loadBookingPort.findById(booking.getId())).thenReturn(Optional.of(booking));
 
         service.handle(event);
@@ -191,14 +180,12 @@ class HandlePaymentEventServiceTest {
         verify(showtimeClientPort, never()).confirmHold(any());
         assertEquals(BookingStatus.PENDING, booking.getStatus());
         verify(saveBookingPort, never()).save(any());
-        verify(inboxPort).markProcessed(event.getEventId(), PaymentEventCommand.PAYMENT_SUCCEEDED);
     }
 
     @Test
     void invalidPaymentRequestCancelsBookingAndReleasesHold() {
         PaymentEventCommand event = event(PaymentEventCommand.PAYMENT_CREATE_FAILED, new BigDecimal("150000"));
         event.setReasonCode(PaymentEventCommand.REASON_INVALID_REQUEST);
-        when(inboxPort.isProcessed(event.getEventId())).thenReturn(false);
         when(loadBookingPort.findById(booking.getId())).thenReturn(Optional.of(booking));
 
         service.handle(event);
@@ -211,7 +198,6 @@ class HandlePaymentEventServiceTest {
     @Test
     void paymentExpiredExpiresBookingEvenIfReleaseFails() {
         PaymentEventCommand event = event(PaymentEventCommand.PAYMENT_EXPIRED, new BigDecimal("150000"));
-        when(inboxPort.isProcessed(event.getEventId())).thenReturn(false);
         when(loadBookingPort.findById(booking.getId())).thenReturn(Optional.of(booking));
         when(showtimeClientPort.releaseHold(booking.getHoldId())).thenThrow(new RuntimeException("showtime down"));
 
@@ -219,6 +205,5 @@ class HandlePaymentEventServiceTest {
 
         assertEquals(BookingStatus.EXPIRED, booking.getStatus());
         verify(saveBookingPort).save(booking);
-        verify(inboxPort).markProcessed(event.getEventId(), PaymentEventCommand.PAYMENT_EXPIRED);
     }
 }

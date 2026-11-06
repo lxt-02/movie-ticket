@@ -2,7 +2,6 @@ package com.mv.bookingservice.application.service;
 
 import com.mv.bookingservice.application.command.PaymentEventCommand;
 import com.mv.bookingservice.application.port.in.HandlePaymentEventUseCase;
-import com.mv.bookingservice.application.port.out.InboxPort;
 import com.mv.bookingservice.application.port.out.LoadBookingPort;
 import com.mv.bookingservice.application.port.out.SaveBookingPort;
 import com.mv.bookingservice.application.port.out.ShowtimeClientPort;
@@ -17,8 +16,9 @@ import java.time.Instant;
 import java.util.Optional;
 
 /**
- * Applies payment-events to bookings. The inbox row and the booking change commit together, so a redelivered
- * event is skipped. Business mismatches are logged and acknowledged (retrying cannot fix them); only technical
+ * Applies payment-events to bookings. No inbox table: every handler is guarded by the booking state (PENDING,
+ * CONFIRMING, CONFIRMED...), so a redelivered event finds the booking already changed and does nothing.
+ * Business mismatches are logged and acknowledged (retrying cannot fix them); only technical
  * errors (database, Showtime call) are thrown so Kafka redelivers.
  */
 @Slf4j
@@ -26,7 +26,6 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class HandlePaymentEventService implements HandlePaymentEventUseCase {
 
-    private final InboxPort inboxPort;
     private final LoadBookingPort loadBookingPort;
     private final SaveBookingPort saveBookingPort;
     private final ShowtimeClientPort showtimeClientPort;
@@ -39,18 +38,12 @@ public class HandlePaymentEventService implements HandlePaymentEventUseCase {
             log.warn("Ignoring payment event without eventId/bookingId: {}", event.getEventType());
             return;
         }
-        if (inboxPort.isProcessed(event.getEventId())) {
-            log.debug("Payment event {} already processed", event.getEventId());
-            return;
-        }
-
         Optional<Booking> found = loadBookingPort.findById(event.getBookingId());
         if (found.isEmpty()) {
             log.warn("Payment event {} for unknown booking {}", event.getEventType(), event.getBookingId());
         } else {
             apply(found.get(), event);
         }
-        inboxPort.markProcessed(event.getEventId(), event.getEventType());
     }
 
     private void apply(Booking booking, PaymentEventCommand event) {
