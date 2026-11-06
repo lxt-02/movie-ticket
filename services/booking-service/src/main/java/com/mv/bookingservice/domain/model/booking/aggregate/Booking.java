@@ -175,7 +175,8 @@ public class Booking {
                 .idempotencyKey(idempotencyKey)
                 .requestHash(requestHash)
                 .currency(currency != null ? currency : "VND")
-                .version(0L)
+                // version stays null: a new booking. Hibernate sets it to 0 on insert. A non-null version makes
+                // Spring Data treat the booking as existing (merge), and Hibernate 7 then fails with a stale-state error.
                 .updatedAt(now)
                 .paymentAttempt(1)
                 .seats(seats)
