@@ -10,8 +10,8 @@ import com.mv.movieservice.domain.model.movie.enums.CrewRole;
 import com.mv.movieservice.domain.model.movie.enums.MovieStatus;
 import com.mv.movieservice.domain.model.movie.valueobject.Genre;
 import com.mv.movieservice.domain.model.movie.valueobject.Person;
-import com.mv.movieservice.infrastructure.persistence.entity.OutboxEventEntity;
-import com.mv.movieservice.infrastructure.persistence.repository.OutboxEventJpaRepository;
+import com.mv.movieservice.infrastructure.persistence.entity.OutboxMessageInfraEntity;
+import com.mv.movieservice.infrastructure.persistence.repository.OutboxMessageJpaRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -35,7 +35,7 @@ class MoviePersistenceIntegrationTest {
     @Autowired
     private LoadMoviePort loadMoviePort;
     @Autowired
-    private OutboxEventJpaRepository outboxEventJpaRepository;
+    private OutboxMessageJpaRepository outboxMessageJpaRepository;
     @Autowired
     private TransactionTemplate transactionTemplate;
 
@@ -80,16 +80,16 @@ class MoviePersistenceIntegrationTest {
 
         manageMovieUseCase.changeStatus(created.getId(), MovieStatus.ARCHIVED);
 
-        List<String> types = outboxEventJpaRepository.findAll().stream()
+        List<String> types = outboxMessageJpaRepository.findAll().stream()
                 .filter(e -> e.getAggregateId().equals(created.getId()))
                 .sorted((a, b) -> a.getCreatedAt().compareTo(b.getCreatedAt()))
-                .map(OutboxEventEntity::getEventType)
+                .map(OutboxMessageInfraEntity::getEventType)
                 .toList();
         assertThat(types).containsExactly("MOVIE_CREATED", "MOVIE_UPDATED", "MOVIE_ARCHIVED");
 
         int queued = movieSearchSyncService.resyncAll();
         assertThat(queued).isGreaterThanOrEqualTo(1);
-        assertThat(outboxEventJpaRepository.findAll()).anyMatch(e ->
+        assertThat(outboxMessageJpaRepository.findAll()).anyMatch(e ->
                 e.getAggregateId().equals(created.getId()) && e.getEventType().equals("MOVIE_SYNCED"));
     }
 }
