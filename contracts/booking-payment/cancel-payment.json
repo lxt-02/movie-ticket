@@ -1,0 +1,10 @@
+{
+  "commandId": "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+  "aggregateId": "3b6a1d2e-8f4c-4a7b-9c1d-2e3f4a5b6c7d",
+  "commandType": "CANCEL_PAYMENT",
+  "occurredAt": "2026-11-04T03:05:00Z",
+  "payload": {
+    "bookingId": "3b6a1d2e-8f4c-4a7b-9c1d-2e3f4a5b6c7d",
+    "reason": "Booking cancelled"
+  }
+}
