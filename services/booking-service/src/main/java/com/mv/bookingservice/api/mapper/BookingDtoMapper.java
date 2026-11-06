@@ -2,7 +2,6 @@ package com.mv.bookingservice.api.mapper;
 
 import com.mv.bookingservice.api.dto.request.CreateBookingRequest;
 import com.mv.bookingservice.api.dto.request.CreateBookingSeatRequest;
-import com.mv.bookingservice.api.dto.response.BookingPaymentContextResponse;
 import com.mv.bookingservice.api.dto.response.BookingResponse;
 import com.mv.bookingservice.api.dto.response.BookingSeatResponse;
 import com.mv.bookingservice.application.command.CreateBookingCommand;
@@ -118,22 +117,6 @@ public class BookingDtoMapper {
                 .unitPrice(seat.getUnitPrice())
                 .ticketCode(seat.getTicketCode())
                 .status(seat.getStatus())
-                .build();
-    }
-
-    public BookingPaymentContextResponse toPaymentContextResponse(Booking booking) {
-        if (booking == null) {
-            return null;
-        }
-        return BookingPaymentContextResponse.builder()
-                .bookingId(booking.getId())
-                .bookingCode(booking.getBookingCode())
-                .userId(booking.getUserId())
-                .showtimeId(booking.getShowtimeId())
-                .amount(booking.getTotalAmount())
-                .currency(booking.getCurrency())
-                .status(booking.getStatus())
-                .expiresAt(booking.getExpiresAt())
                 .build();
     }
 
