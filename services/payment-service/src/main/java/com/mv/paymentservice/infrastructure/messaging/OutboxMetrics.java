@@ -1,6 +1,6 @@
 package com.mv.paymentservice.infrastructure.messaging;
 
-import com.mv.paymentservice.infrastructure.persistence.entity.OutboxStatus;
+import com.mv.paymentservice.domain.model.outbox.OutboxMessageStatus;
 import com.mv.paymentservice.infrastructure.persistence.repository.OutboxMessageJpaRepository;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -17,12 +17,12 @@ import java.time.Instant;
 public class OutboxMetrics {
 
     public OutboxMetrics(MeterRegistry registry, OutboxMessageJpaRepository repository) {
-        Gauge.builder("payment.outbox.messages", repository, r -> r.countByStatus(OutboxStatus.PENDING))
+        Gauge.builder("payment.outbox.messages", repository, r -> r.countByStatus(OutboxMessageStatus.PENDING.name()))
                 .tag("status", "pending").description("Outbox messages not published yet").register(registry);
-        Gauge.builder("payment.outbox.messages", repository, r -> r.countByStatus(OutboxStatus.FAILED))
+        Gauge.builder("payment.outbox.messages", repository, r -> r.countByStatus(OutboxMessageStatus.FAILED.name()))
                 .tag("status", "failed").description("Outbox messages with a permanent error").register(registry);
         Gauge.builder("payment.outbox.oldest.pending.seconds", repository, r -> {
-            Instant oldest = r.oldestCreatedAt(OutboxStatus.PENDING);
+            Instant oldest = r.oldestCreatedAt(OutboxMessageStatus.PENDING.name());
             return oldest == null ? 0 : Duration.between(oldest, Instant.now()).toSeconds();
         }).description("Age of the oldest unpublished outbox message").register(registry);
     }
