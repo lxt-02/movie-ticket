@@ -1,6 +1,5 @@
 package com.mv.paymentservice.infrastructure.persistence.repository;
 
-import com.mv.paymentservice.domain.model.payment.enums.PaymentStatus;
 import com.mv.paymentservice.infrastructure.persistence.entity.PaymentEntity;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -10,7 +9,6 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
-import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -21,9 +19,6 @@ public interface PaymentJpaRepository extends JpaRepository<PaymentEntity, UUID>
     Optional<PaymentEntity> findFirstByIdempotencyKeyOrderByCreatedAtDesc(String idempotencyKey);
 
     /** Latest usable payment of a booking (to reuse its link). */
-    Optional<PaymentEntity> findFirstByBookingIdAndPaymentStatusInOrderByCreatedAtDesc(
-            UUID bookingId, Collection<PaymentStatus> statuses);
-
     Optional<PaymentEntity> findFirstByBookingIdOrderByCreatedAtDesc(UUID bookingId);
 
     List<PaymentEntity> findByBookingIdOrderByCreatedAtDesc(UUID bookingId);

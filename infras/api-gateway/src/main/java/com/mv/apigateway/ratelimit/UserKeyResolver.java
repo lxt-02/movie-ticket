@@ -9,19 +9,9 @@ import reactor.core.publisher.Mono;
 
 import java.security.Principal;
 
-/**
- * Per-user key: {@code rl:user:{userId}:{routeId}}.
- * <p>
- * Identity source, in order:
- * <ol>
- *   <li>Authenticated principal (production, once JWT is integrated).</li>
- *   <li>{@code X-User-Id} header, only when {@code app.rate-limit.trust-user-id-header=true} (dev/demo).</li>
- * </ol>
- * No identity returns an empty key, so the route rejects the request (deny-empty-key -> 401)
- * instead of silently falling back to another bucket.
- */
+
 @Component("userKeyResolver")
-@Primary // Spring Cloud Gateway injects one default KeyResolver by type
+@Primary
 public class UserKeyResolver implements KeyResolver {
 
     private static final String USER_ID_HEADER = "X-User-Id";
