@@ -12,8 +12,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Turns a payment event into an outbox message (same transaction as the business change).
- * Topic payment-events, key = bookingId so all events of one booking stay ordered on one partition.
+ * Ghi event thanh toán vào bảng outbox_messages, cùng transaction với thay đổi của payment; {@link OutboxRelay} mới
+ * là bên gửi lên Kafka. Topic payment-events, key = bookingId để mọi event của một booking vào cùng partition
+ * (giữ thứ tự).
  */
 @Component
 @RequiredArgsConstructor
@@ -25,6 +26,7 @@ public class PaymentEventOutboxAdapter implements PaymentEventOutboxPort {
     private final KafkaTopicsProperties topics;
     private final JsonCodec json;
 
+    /** Bọc event thành { eventId, aggregateId, eventType, occurredAt, payload } và lưu dòng PENDING. */
     @Override
     public void append(PaymentEvent event) {
         Map<String, Object> envelope = new LinkedHashMap<>();
