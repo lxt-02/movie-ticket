@@ -1,7 +1,7 @@
 package com.mv.paymentservice.infrastructure.messaging;
 
-import com.mv.paymentservice.infrastructure.persistence.entity.OutboxMessageInfraEntity;
 import com.mv.paymentservice.domain.model.outbox.OutboxMessageStatus;
+import com.mv.paymentservice.infrastructure.persistence.entity.OutboxMessageInfraEntity;
 import com.mv.paymentservice.infrastructure.persistence.repository.OutboxMessageJpaRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -17,19 +17,28 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Publishes outbox_messages to Kafka.
+ * Outbox relay của payment-service: gửi các dòng {@code outbox_messages} lên Kafka (topic payment-events,
+ * key = bookingId).
+ *
+ * <h3>Một lượt chạy</h3>
  * <ol>
- *     <li>Claim a batch (FOR UPDATE SKIP LOCKED) and mark it PROCESSING with a deadline, then commit.</li>
- *     <li>Send each message and wait for the broker ack.</li>
- *     <li>Mark PUBLISHED; or, on a <b>temporary</b> error (broker down, topic missing, timeout), back to PENDING with
- *     an exponential back-off (retry-delay-ms x 2^n, max max-retry-delay-ms) and the rest of the batch is released
- *     at once (it would hit the same broker problem); or, on a <b>permanent</b> error (no permission, record too
- *     large), FAILED. See {@link KafkaPublishErrors}.</li>
+ *     <li><b>Nhận lô</b> ({@link #claimBatch()}): khoá các dòng gửi được ({@code FOR UPDATE SKIP LOCKED}), chuyển
+ *     PROCESSING kèm hạn chót, commit. Nhiều instance chạy cùng lúc sẽ nhận các lô khác nhau.</li>
+ *     <li><b>Gửi từng message</b> ({@link #publish}) và chờ broker ack, mỗi kết quả ghi trong transaction riêng.</li>
+ *     <li>Kết quả:
+ *         <ul>
+ *             <li>Thành công → PUBLISHED.</li>
+ *             <li><b>Lỗi tạm thời</b> (broker sập, chưa có topic, timeout) → về PENDING, hẹn thử lại theo back-off
+ *             (retry-delay-ms × 2^n, tối đa max-retry-delay-ms). Phần còn lại của lô được nhả ngay
+ *             ({@link #release}), vì sẽ gặp cùng lỗi broker.</li>
+ *             <li><b>Lỗi vĩnh viễn</b> (không có quyền, message quá lớn) → FAILED.</li>
+ *         </ul>
+ *     </li>
  * </ol>
- * A temporary error never makes a message FAILED: PAYMENT_SUCCEEDED must survive a long broker outage. FAILED rows
- * wait for an operator: POST /api/v1/payments/admin/outbox/requeue-failed.
- * Messages stuck in PROCESSING past the deadline (instance crashed) are claimed again. Delivery is at-least-once;
- * booking-service applies each event idempotently (state-guarded, no inbox).
+ * Lỗi tạm thời không bao giờ làm message FAILED: PAYMENT_SUCCEEDED phải sống qua cả một đợt broker sập dài.
+ * Dòng FAILED chờ người vận hành: POST /api/v1/payments/admin/outbox/requeue-failed. Dòng kẹt PROCESSING quá hạn
+ * (instance chết giữa chừng) được nhận lại ở lượt sau. Giao ít nhất một lần (at-least-once); booking-service áp
+ * dụng event idempotent theo trạng thái booking.
  */
 @Slf4j
 @Component
@@ -55,6 +64,7 @@ public class OutboxRelay {
         this.clock = clock;
     }
 
+    /** Một lượt chạy: nhận lô → gửi lần lượt → gặp lỗi tạm thời thì nhả phần còn lại và dừng. */
     @Scheduled(
             fixedDelayString = "${payment.outbox.relay-delay-ms:10000}",
             initialDelayString = "${payment.outbox.relay-initial-delay-ms:1000}"
@@ -66,13 +76,15 @@ public class OutboxRelay {
         }
         for (int i = 0; i < batch.size(); i++) {
             Instant retryAt = publish(batch.get(i));
-            if (retryAt != null) {
+            boolean brokerProblem = retryAt != null;
+            if (brokerProblem) {
                 release(batch.subList(i + 1, batch.size()), retryAt);
                 return;
             }
         }
     }
 
+    /** Khoá và nhận một lô: PROCESSING, tăng số lần thử, hạn chót = now + stale-publishing-timeout. */
     private List<OutboxMessageInfraEntity> claimBatch() {
         Instant now = clock.instant();
         List<OutboxMessageInfraEntity> claimed = repository.findClaimableForUpdate(now, properties.batchSize());
@@ -85,33 +97,37 @@ public class OutboxRelay {
         return repository.saveAll(claimed);
     }
 
-    /** Returns null when done (published or FAILED), or the retry time after a temporary error. */
+    /**
+     * Gửi một message và chờ ack.
+     *
+     * @return {@code null} khi đã xong (PUBLISHED hoặc FAILED); thời điểm thử lại khi gặp lỗi tạm thời
+     */
     private Instant publish(OutboxMessageInfraEntity message) {
         try {
             kafkaTemplate.send(message.getTopic(), message.getMessageKey(), message.getPayload())
                     .get(properties.publishTimeoutMs(), TimeUnit.MILLISECONDS);
             log.info("Kafka SEND topic={} key={} type={} body={}",
                     message.getTopic(), message.getMessageKey(), message.getEventType(), message.getPayload());
-            transactionTemplate.executeWithoutResult(status -> markPublished(message.getId()));
+            inTransaction(() -> markPublished(message.getId()));
             return null;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             Instant retryAt = clock.instant();
-            transactionTemplate.executeWithoutResult(status -> markForRetry(message.getId(), e, retryAt));
+            inTransaction(() -> markForRetry(message.getId(), e, retryAt));
             return retryAt;
         } catch (Exception e) {
             Throwable cause = KafkaPublishErrors.rootCause(e);
             if (KafkaPublishErrors.isPermanent(cause)) {
-                transactionTemplate.executeWithoutResult(status -> markFailed(message.getId(), cause));
+                inTransaction(() -> markFailed(message.getId(), cause));
                 return null;
             }
             Instant retryAt = clock.instant().plus(backOff(message.getRetryCount()));
-            transactionTemplate.executeWithoutResult(status -> markForRetry(message.getId(), cause, retryAt));
+            inTransaction(() -> markForRetry(message.getId(), cause, retryAt));
             return retryAt;
         }
     }
 
-    /** retry-delay-ms, x2 per attempt, capped. */
+    /** Thời gian chờ trước lần thử thứ {@code attempts}: retry-delay-ms, gấp đôi mỗi lần, không quá max-retry-delay-ms. */
     Duration backOff(int attempts) {
         long delay = properties.retryDelayMs() << Math.min(Math.max(attempts - 1, 0), 20);
         return Duration.ofMillis(Math.min(delay, properties.maxRetryDelayMs()));
@@ -127,6 +143,7 @@ public class OutboxRelay {
         });
     }
 
+    /** Lỗi tạm thời: về PENDING, thử lại lúc {@code retryAt}. */
     private void markForRetry(UUID id, Throwable error, Instant retryAt) {
         repository.findById(id).ifPresent(message -> {
             message.setStatus(OutboxMessageStatus.PENDING.name());
@@ -145,6 +162,7 @@ public class OutboxRelay {
         });
     }
 
+    /** Lỗi vĩnh viễn: FAILED, chờ người vận hành sửa rồi requeue. */
     private void markFailed(UUID id, Throwable error) {
         repository.findById(id).ifPresent(message -> {
             message.setStatus(OutboxMessageStatus.FAILED.name());
@@ -157,12 +175,15 @@ public class OutboxRelay {
         });
     }
 
-    /** Not attempted in this run (broker problem): back to PENDING, this claim does not count as an attempt. */
+    /**
+     * Các message chưa kịp gửi trong lượt này (broker đang lỗi): về PENDING, thử lại lúc {@code retryAt}. Lần nhận
+     * lô vừa rồi không tính là một lần thử nên trừ lại {@code retry_count}.
+     */
     private void release(List<OutboxMessageInfraEntity> notAttempted, Instant retryAt) {
         if (notAttempted.isEmpty()) {
             return;
         }
-        transactionTemplate.executeWithoutResult(status -> notAttempted.forEach(claimed ->
+        inTransaction(() -> notAttempted.forEach(claimed ->
                 repository.findById(claimed.getId()).ifPresent(message -> {
                     message.setStatus(OutboxMessageStatus.PENDING.name());
                     message.setRetryCount(Math.max(0, message.getRetryCount() - 1));
@@ -171,5 +192,9 @@ public class OutboxRelay {
                 })));
         log.warn("OUTBOX broker problem: {} other message(s) of this batch released until {}", notAttempted.size(),
                 retryAt);
+    }
+
+    private void inTransaction(Runnable work) {
+        transactionTemplate.executeWithoutResult(status -> work.run());
     }
 }

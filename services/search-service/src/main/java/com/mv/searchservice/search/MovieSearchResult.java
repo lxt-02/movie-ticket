@@ -4,11 +4,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
-/**
- * One page of search results with facet counts.
- *
- * @param facets facet name (genres, status, ageRating, language, country) -> buckets, most frequent first
- */
+
 public record MovieSearchResult(
         List<Hit> items,
         int page,
@@ -19,9 +15,8 @@ public record MovieSearchResult(
         long tookMs
 ) {
 
-    /**
-     * @param highlight field -> fragments with the matched words wrapped in &lt;em&gt;...&lt;/em&gt;
-     */
+
+
     public record Hit(
             String id,
             String title,
