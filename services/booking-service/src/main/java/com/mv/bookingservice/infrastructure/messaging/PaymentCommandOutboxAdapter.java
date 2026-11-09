@@ -14,14 +14,17 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Writes payment commands into outbox_messages (aggregateType BOOKING). Message format (topic payment-commands, key = bookingId):
+ * Ghi lệnh thanh toán vào bảng outbox_messages, cùng transaction với thay đổi booking; {@link BookingOutboxRelay}
+ * mới là bên gửi lên Kafka. Nhờ vậy booking đã lưu thì lệnh chắc chắn được gửi, booking rollback thì lệnh cũng mất.
+ * <p>
+ * Định dạng message (topic payment-commands, key = bookingId để mọi lệnh của một booking vào cùng partition):
  * <pre>
  * { commandId, aggregateId, commandType: "CREATE_PAYMENT", occurredAt,
  *   payload: { bookingId, userId, amount, currency, provider, description, expiredAt, idempotencyKey } }
  * { commandId, aggregateId, commandType: "CANCEL_PAYMENT", occurredAt, payload: { bookingId, reason } }
  * </pre>
- * The idempotency key carries the attempt number, so "pay again" is a new key and payment-service replaces
- * the previous link, while a redelivered command (same key) returns the same payment.
+ * idempotencyKey chứa số lần thanh toán: "thanh toán lại" là key mới nên payment-service tạo link mới, còn một
+ * lệnh bị giao lại (cùng key) thì trả lại đúng thanh toán cũ.
  */
 @Component
 @RequiredArgsConstructor
@@ -36,6 +39,7 @@ public class PaymentCommandOutboxAdapter implements PaymentCommandPort {
     private final BookingKafkaProperties properties;
     private final JsonCodec json;
 
+    /** CREATE_PAYMENT: yêu cầu payment-service tạo link PayOS cho booking. */
     @Override
     public void requestPayment(Booking booking) {
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -49,18 +53,20 @@ public class PaymentCommandOutboxAdapter implements PaymentCommandPort {
         payload.put("expiredAt", booking.getExpiresAt());
         payload.put("idempotencyKey",
                 "payment:create:" + PROVIDER + ":" + booking.getId() + ":" + booking.currentPaymentAttempt());
-        write(booking, CREATE_PAYMENT, payload);
+        saveToOutbox(booking, CREATE_PAYMENT, payload);
     }
 
+    /** CANCEL_PAYMENT: yêu cầu payment-service huỷ các link còn mở của booking. */
     @Override
     public void cancelPayments(Booking booking, String reason) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("bookingId", booking.getId());
         payload.put("reason", reason);
-        write(booking, CANCEL_PAYMENT, payload);
+        saveToOutbox(booking, CANCEL_PAYMENT, payload);
     }
 
-    private void write(Booking booking, String commandType, Map<String, Object> payload) {
+    /** Bọc payload thành message { commandId, aggregateId, commandType, occurredAt, payload } và lưu dòng PENDING. */
+    private void saveToOutbox(Booking booking, String commandType, Map<String, Object> payload) {
         UUID commandId = UUID.randomUUID();
         Instant now = Instant.now();
 

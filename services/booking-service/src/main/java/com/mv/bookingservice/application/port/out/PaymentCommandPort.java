@@ -2,7 +2,6 @@ package com.mv.bookingservice.application.port.out;
 
 import com.mv.bookingservice.domain.model.booking.aggregate.Booking;
 
-import java.util.UUID;
 
 /**
  * Commands for payment-service on Kafka topic payment-commands, written to the booking outbox in the caller's
