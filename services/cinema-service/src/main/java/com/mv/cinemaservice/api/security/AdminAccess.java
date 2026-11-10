@@ -2,10 +2,6 @@ package com.mv.cinemaservice.api.security;
 
 import com.mv.cinemaservice.infrastructure.security.CurrentUser;
 
-/**
- * Admin check for writes: the role comes from the {@code SecurityContextHolder} (built from the X-User-Role header
- * that the gateway takes from the Keycloak token).
- */
 public final class AdminAccess {
 
     public static final String ADMIN = "ADMIN";

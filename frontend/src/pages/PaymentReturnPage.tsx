@@ -13,7 +13,8 @@ import { pendingBooking, pollBookingUntilSettled, type Outcome } from '../utils/
 export default function PaymentReturnPage({ kind }: { kind: 'success' | 'cancel' }) {
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const bookingId = pendingBooking.get() ?? params.get('bookingId');
+  // Read once on mount: pendingBooking is cleared after settling, re-reading it each render would lose the id
+  const [bookingId] = useState(() => pendingBooking.get() ?? params.get('bookingId'));
   const [outcome, setOutcome] = useState<Outcome>();
   const [error, setError] = useState<unknown>();
   const [round, setRound] = useState(0);
