@@ -84,12 +84,6 @@ public class BookingMaintenanceService implements BookingMaintenanceUseCase {
         return booking.getExpiresAt() != null && now.isBefore(booking.getExpiresAt().plus(policy.holdSafetyMargin()));
     }
 
-    /**
-     * The booking is paid but its PAYMENT_SUCCEEDED event was never applied: confirm it instead of expiring it.
-     *
-     * @return false if the payment cannot be used for this booking (wrong amount, paid after the deadline): the
-     * case is logged and the booking expires as usual
-     */
     private boolean recoverPaidBooking(Booking booking, PaidPayment payment) {
         boolean sameAmount = payment.amount() != null && booking.getTotalAmount() != null
                 && payment.amount().compareTo(booking.getTotalAmount()) == 0
@@ -127,7 +121,6 @@ public class BookingMaintenanceService implements BookingMaintenanceUseCase {
         return confirmed;
     }
 
-    /** After the commit, so a rolled-back state change never gives the seats away. */
     private void releaseHoldQuietly(Booking booking) {
         AfterCommit.run(() -> releaseHoldNow(booking));
     }

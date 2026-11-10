@@ -10,25 +10,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Builds the Elasticsearch query DSL for a movie search.
- * <pre>
- * {
- *   "query":       keyword / person (scored) + release-date and duration ranges (filter, not scored),
- *   "post_filter": genres, status, ageRating, language, country (the facet criteria),
- *   "aggs":        one facet per criterion, each filtered by all OTHER facet criteria,
- *   "highlight", "sort", "from", "size"
- * }
- * </pre>
- * Facet criteria go in {@code post_filter} instead of the query so that a facet still shows the other values of
- * its own criterion ("multi-select facets"): after ticking "Action", the genre facet keeps showing
- * "Drama (3)" so the user can add it, while the status facet only counts Action movies.
- */
+
 @Component
 @RequiredArgsConstructor
 public class MovieSearchQueryBuilder {
 
-    /** Facet name -> keyword field in the index. */
     public static final Map<String, String> FACETS = Map.of(
             "genres", "genres",
             "status", "status",

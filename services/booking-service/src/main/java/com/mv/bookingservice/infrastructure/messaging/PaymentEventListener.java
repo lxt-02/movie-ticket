@@ -10,14 +10,14 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
 /**
- * Consumes payment-events from payment-service.
+ * Nhận kết quả thanh toán từ payment-service (topic payment-events).
  * <ul>
- *     <li>{@link #onMessage}: the main topic. Technical errors are retried with backoff, then the record goes to
- *     {@code payment-events.DLT} (see KafkaConfig). An unreadable record (malformed JSON, no eventId) goes to the
- *     DLT at once, without retries ({@link NonRetryableMessageException}).</li>
- *     <li>{@link #onDeadLetter}: replays the DLT. Not started on boot: started on demand once the cause is fixed
- *     (POST /api/v1/bookings/admin/payment-events-dlt/replay). Safe to replay: the handlers are state-guarded, so
- *     an event already applied changes nothing.</li>
+ *     <li>{@link #onMessage}: topic chính. Lỗi kỹ thuật được Kafka thử lại có back-off, hết lượt thì record sang
+ *     {@code payment-events.DLT} (xem KafkaConfig). Record không đọc được (JSON hỏng, thiếu eventId) sang DLT ngay,
+ *     không thử lại ({@link NonRetryableMessageException}).</li>
+ *     <li>{@link #onDeadLetter}: phát lại DLT. Không tự chạy khi khởi động; bật bằng
+ *     POST /api/v1/bookings/admin/payment-events-dlt/replay sau khi đã sửa nguyên nhân. Phát lại an toàn vì handler
+ *     kiểm tra trạng thái booking: event đã áp dụng rồi thì không đổi gì.</li>
  * </ul>
  */
 @Slf4j
@@ -25,7 +25,7 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class PaymentEventListener {
 
-    /** Listener container id of the DLT replay (see PaymentEventsOpsController). */
+    /** Id của listener phát lại DLT (dùng ở PaymentEventsOpsController). */
     public static final String DLT_REPLAY_LISTENER_ID = "payment-events-dlt-replay";
 
     private final JsonCodec json;
@@ -40,7 +40,7 @@ public class PaymentEventListener {
         log.info("Kafka RECV topic={} partition={} offset={} key={} body={}",
                 record.topic(), record.partition(), record.offset(), record.key(), record.value());
         chaos.maybeFail();
-        process(record);
+        handle(record);
     }
 
     @KafkaListener(
@@ -53,20 +53,27 @@ public class PaymentEventListener {
         log.warn("DLT REPLAY topic={} partition={} offset={} key={} body={}",
                 record.topic(), record.partition(), record.offset(), record.key(), record.value());
         try {
-            process(record);
+            handle(record);
         } catch (NonRetryableMessageException e) {
-            // Still unreadable: it stays in the DLT (Kafka keeps it), do not send it to the DLT again (loop).
+            // Vẫn không đọc được: để nguyên trong DLT (Kafka còn giữ), không gửi lại vào DLT (tránh vòng lặp).
             log.error("DLT REPLAY skipped unreadable record {}-{}@{}: {}",
                     record.topic(), record.partition(), record.offset(), e.getMessage());
         }
     }
 
-    private void process(ConsumerRecord<String, String> record) {
+    /** Đọc record → đổi sang command → giao cho use case. */
+    private void handle(ConsumerRecord<String, String> record) {
+        PaymentEventMessage message = parse(record);
+        handlePaymentEventUseCase.handle(toCommand(message));
+    }
+
+    /** JSON → message. Không đọc được hoặc thiếu eventId / eventType thì ném lỗi "không thử lại" (sang DLT ngay). */
+    private PaymentEventMessage parse(ConsumerRecord<String, String> record) {
         PaymentEventMessage message;
         try {
             message = json.read(record.value(), PaymentEventMessage.class);
         } catch (IllegalArgumentException e) {
-            // Not dropped: straight to payment-events.DLT (no retry), so the event is kept for investigation.
+            // Không vứt bỏ: sang thẳng payment-events.DLT (không retry) để giữ lại điều tra.
             log.error("Malformed payment event at {}-{}@{}, sending it to the DLT: {}",
                     record.topic(), record.partition(), record.offset(), e.getMessage());
             throw new NonRetryableMessageException("Malformed payment event: " + e.getMessage(), e);
@@ -74,20 +81,36 @@ public class PaymentEventListener {
         if (message.eventId() == null || message.eventType() == null) {
             throw new NonRetryableMessageException("Payment event without eventId / eventType", null);
         }
+        return message;
+    }
+
+    private static PaymentEventCommand toCommand(PaymentEventMessage message) {
         PaymentEventMessage.Payload p = message.payload();
-        String reason = p == null ? null
-                : p.reason() != null ? p.reason() + (p.message() != null ? ": " + p.message() : "")
-                : p.failureReason();
-        handlePaymentEventUseCase.handle(PaymentEventCommand.builder()
+        if (p == null) {
+            return PaymentEventCommand.builder()
+                    .eventId(message.eventId())
+                    .eventType(message.eventType())
+                    .bookingId(message.aggregateId())
+                    .build();
+        }
+        return PaymentEventCommand.builder()
                 .eventId(message.eventId())
                 .eventType(message.eventType())
-                .bookingId(p != null && p.bookingId() != null ? p.bookingId() : message.aggregateId())
-                .paymentId(p == null ? null : p.paymentId())
-                .amount(p == null ? null : p.amount())
-                .currency(p == null ? null : p.currency())
-                .paidAt(p == null ? null : p.paidAt())
-                .reasonCode(p == null ? null : p.reason())
-                .reason(reason)
-                .build());
+                .bookingId(p.bookingId() != null ? p.bookingId() : message.aggregateId())
+                .paymentId(p.paymentId())
+                .amount(p.amount())
+                .currency(p.currency())
+                .paidAt(p.paidAt())
+                .reasonCode(p.reason())
+                .reason(reasonText(p))
+                .build();
+    }
+
+    /** "PROVIDER_ERROR: chi tiết" khi có mã lý do; không thì dùng failureReason. */
+    private static String reasonText(PaymentEventMessage.Payload p) {
+        if (p.reason() == null) {
+            return p.failureReason();
+        }
+        return p.message() != null ? p.reason() + ": " + p.message() : p.reason();
     }
 }

@@ -30,10 +30,6 @@ public class JsonCodec {
         return mapper.createArrayNode();
     }
 
-    public JsonNode toTree(Object value) {
-        return mapper.valueToTree(value);
-    }
-
     public String write(Object value) {
         try {
             return mapper.writeValueAsString(value);
