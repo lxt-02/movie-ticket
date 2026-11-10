@@ -11,12 +11,7 @@ import reactor.core.publisher.Mono;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
-/**
- * Starts the correlation ID of a user action: keeps a valid {@code X-Correlation-Id} sent by the client, otherwise
- * creates one. It is forwarded to the service (which logs it and passes it on with Feign) and returned in the
- * response, so the frontend can show it in an error message. Runs before Spring Security (order -100), so 401 / 403
- * answers carry it too.
- */
+
 @Component
 @Order(-200)
 public class CorrelationIdWebFilter implements WebFilter {

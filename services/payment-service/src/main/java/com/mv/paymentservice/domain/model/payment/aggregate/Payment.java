@@ -122,14 +122,6 @@ public class Payment {
         this.updatedAt = now;
     }
 
-    /** PENDING link that the buyer can still open. */
-    public boolean isReusable(Instant now) {
-        return status == PaymentStatus.PENDING
-                && checkoutUrl != null
-                && expiredAt != null
-                && expiredAt.isAfter(now);
-    }
-
     /**
      * @param paidAt time of the bank transaction reported by PayOS (falls back to now when unknown)
      * @param now    processing time

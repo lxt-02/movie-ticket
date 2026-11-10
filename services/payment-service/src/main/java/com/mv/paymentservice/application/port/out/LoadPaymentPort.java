@@ -12,9 +12,6 @@ public interface LoadPaymentPort {
 
     Optional<Payment> findByIdempotencyKey(String idempotencyKey);
 
-    /** Latest PENDING/PROCESSING payment of a booking. */
-    Optional<Payment> findActiveByBookingId(UUID bookingId);
-
     Optional<Payment> findLatestByBookingId(UUID bookingId);
 
     List<Payment> findByBookingId(UUID bookingId);
