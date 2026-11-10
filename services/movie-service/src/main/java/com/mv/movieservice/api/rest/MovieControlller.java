@@ -19,29 +19,15 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PatchMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
-/**
- * Public movie catalogue (GET) and admin management (POST / PUT / PATCH / DELETE).
- *
- * @author giathanh795
- */
 @RestController
 @RequestMapping("/api/v1/movies")
 @RequiredArgsConstructor
-public class MovieController {
 
+public class MovieControlller {
     private final GetMovieUseCase getMovieUseCase;
     private final ManageMovieUseCase manageMovieUseCase;
     private final MovieDtoMapper movieDtoMapper;
@@ -51,7 +37,8 @@ public class MovieController {
             @RequestParam(required = false) MovieStatus status,
             @RequestParam(required = false, name = "q") String keyword,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size
+    ) {
         boolean admin = AdminAccess.isAdmin();
         MovieStatus effectiveStatus = !admin && status == MovieStatus.ARCHIVED ? null : status;
         var result = getMovieUseCase.search(SearchMoviesQuery.builder()
@@ -61,11 +48,12 @@ public class MovieController {
                 .page(page)
                 .size(size)
                 .build());
+
         return ResponseEntity.ok(ApiResponse.success(PageResponse.of(result, movieDtoMapper::toResponse)));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<MovieResponse>> getById(@PathVariable("id") UUID id) {
+    public ResponseEntity<ApiResponse<MovieResponse>> getById(@PathVariable UUID id) {
         Movie movie = getMovieUseCase.getById(new GetMovieQuery(id));
         if (movie.isArchived() && !AdminAccess.isAdmin()) {
             throw new MovieNotFoundException(id);
@@ -83,8 +71,9 @@ public class MovieController {
 
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<MovieResponse>> update(
-            @PathVariable("id") UUID id,
-            @Valid @RequestBody MovieRequest request) {
+            @PathVariable UUID id,
+            @Valid @RequestBody MovieRequest request
+    ) {
         AdminAccess.require();
         Movie movie = manageMovieUseCase.update(id, toCommand(request));
         return ResponseEntity.ok(ApiResponse.success("Movie updated", movieDtoMapper.toResponse(movie)));
@@ -92,15 +81,17 @@ public class MovieController {
 
     @PatchMapping("/{id}/status")
     public ResponseEntity<ApiResponse<MovieResponse>> changeStatus(
-            @PathVariable("id") UUID id,
-            @Valid @RequestBody StatusRequest request) {
+            @PathVariable UUID id,
+            @Valid @RequestBody StatusRequest request
+    ) {
         AdminAccess.require();
         Movie movie = manageMovieUseCase.changeStatus(id, request.getStatus());
         return ResponseEntity.ok(ApiResponse.success("Movie status changed", movieDtoMapper.toResponse(movie)));
     }
 
+    /** Soft delete: the movie is ARCHIVED, existing showtimes / bookings are untouched. */
     @DeleteMapping("/{id}")
-    public ResponseEntity<ApiResponse<MovieResponse>> archive(@PathVariable("id") UUID id) {
+    public ResponseEntity<ApiResponse<MovieResponse>> archive(@PathVariable UUID id) {
         AdminAccess.require();
         Movie movie = manageMovieUseCase.archive(id);
         return ResponseEntity.ok(ApiResponse.success("Movie archived", movieDtoMapper.toResponse(movie)));
