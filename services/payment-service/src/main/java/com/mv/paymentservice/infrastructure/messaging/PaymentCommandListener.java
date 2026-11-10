@@ -18,11 +18,15 @@ import org.springframework.transaction.TransactionException;
 import java.util.UUID;
 
 /**
- * Consumes payment-commands (CREATE_PAYMENT, CANCEL_PAYMENT). A failed CREATE_PAYMENT is answered with PAYMENT_CREATE_FAILED (written in a new
- * transaction) and the message is acknowledged, not retried. Database errors, and an error while recording that failure
- * (e.g. database down), are rethrown so Kafka retries the command, then parks it in payment-commands.DLT.
- * A command that can never be processed (malformed JSON, unknown type, missing payload) goes to the DLT at once,
- * without retries ({@link NonRetryableMessageException}): kept for investigation instead of being dropped.
+ * Nhận lệnh từ booking-service (topic payment-commands): CREATE_PAYMENT, CANCEL_PAYMENT.
+ * <ul>
+ *     <li>CREATE_PAYMENT lỗi (dữ liệu sai, PayOS lỗi): trả lời bằng event PAYMENT_CREATE_FAILED (ghi trong
+ *     transaction mới) và xác nhận message, <b>không</b> thử lại.</li>
+ *     <li>Lỗi database của chính payment-service, hoặc lỗi khi ghi PAYMENT_CREATE_FAILED: ném lại để Kafka thử lại,
+ *     hết lượt thì vào payment-commands.DLT.</li>
+ *     <li>Lệnh không bao giờ xử lý được (JSON hỏng, commandType lạ, thiếu payload): sang DLT ngay, không thử lại
+ *     ({@link NonRetryableMessageException}), giữ lại để điều tra thay vì vứt bỏ.</li>
+ * </ul>
  */
 @Slf4j
 @Component
@@ -34,6 +38,7 @@ public class PaymentCommandListener {
     private final RecordPaymentCreationFailureUseCase recordFailureUseCase;
     private final CancelBookingPaymentsUseCase cancelBookingPaymentsUseCase;
 
+    /** Đọc message rồi chuyển cho hàm xử lý theo commandType. */
     @KafkaListener(
             topics = "${payment.kafka.payment-commands:payment-commands}",
             groupId = "${spring.kafka.consumer.group-id:payment-service}"
@@ -41,36 +46,45 @@ public class PaymentCommandListener {
     public void onMessage(ConsumerRecord<String, String> record) {
         log.info("Kafka RECV topic={} partition={} offset={} key={} body={}",
                 record.topic(), record.partition(), record.offset(), record.key(), record.value());
-        PaymentCommandMessage message;
+        PaymentCommandMessage message = parse(record);
+
+        if (PaymentCommandMessage.CANCEL_PAYMENT.equals(message.commandType())) {
+            onCancelPayment(message);
+        } else if (PaymentCommandMessage.CREATE_PAYMENT.equals(message.commandType())) {
+            onCreatePayment(message);
+        } else {
+            throw new NonRetryableMessageException("Unknown commandType " + message.commandType()
+                    + " (commandId " + message.commandId() + ")", null);
+        }
+    }
+
+    /** JSON → message; JSON hỏng thì ném lỗi "không thử lại" (sang DLT ngay). */
+    private PaymentCommandMessage parse(ConsumerRecord<String, String> record) {
         try {
-            message = json.read(record.value(), PaymentCommandMessage.class);
+            return json.read(record.value(), PaymentCommandMessage.class);
         } catch (IllegalArgumentException e) {
-            // Not dropped: straight to payment-commands.DLT (no retry), kept for investigation.
+            // Không vứt bỏ: sang thẳng payment-commands.DLT (không retry) để giữ lại điều tra.
             log.error("Malformed payment command at {}-{}@{}, sending it to the DLT: {}",
                     record.topic(), record.partition(), record.offset(), e.getMessage());
             throw new NonRetryableMessageException("Malformed payment command: " + e.getMessage(), e);
         }
+    }
 
-        if (PaymentCommandMessage.CANCEL_PAYMENT.equals(message.commandType())) {
-            onCancelPayment(message);
-            return;
-        }
-        if (!PaymentCommandMessage.CREATE_PAYMENT.equals(message.commandType())) {
-            throw new NonRetryableMessageException("Unknown commandType " + message.commandType()
-                    + " (commandId " + message.commandId() + ")", null);
-        }
+    /**
+     * Tạo link thanh toán. Lỗi nghiệp vụ / PayOS → ghi PAYMENT_CREATE_FAILED cho booking biết; lỗi database của mình
+     * → ném lại để Kafka thử lại (không báo nhầm cho booking rằng PayOS lỗi).
+     */
+    private void onCreatePayment(PaymentCommandMessage message) {
         if (message.payload() == null) {
             throw new NonRetryableMessageException("CREATE_PAYMENT without payload (commandId "
                     + message.commandId() + ")", null);
         }
-
-        CreatePaymentCommand command = toCommand(message);
+        CreatePaymentCommand command = toCreateCommand(message);
         try {
             createPaymentUseCase.createPayment(command);
         } catch (DomainException e) {
             recordFailureUseCase.recordFailure(command, PaymentEventFactory.REASON_INVALID_REQUEST, e.getMessage());
         } catch (DataAccessException | TransactionException e) {
-            // Our own database, not PayOS: retry the command (then DLT) instead of telling booking that PayOS failed.
             log.error("CREATE_PAYMENT for booking {} hit a database error, will be retried: {}",
                     command.getBookingId(), e.getMessage());
             throw e;
@@ -80,7 +94,7 @@ public class PaymentCommandListener {
         }
     }
 
-    /** Database errors propagate so Kafka redelivers; PayOS errors are handled inside the use case. */
+    /** Huỷ các thanh toán còn mở của booking. Lỗi database ném lại để Kafka giao lại; lỗi PayOS do use case tự xử lý. */
     private void onCancelPayment(PaymentCommandMessage message) {
         PaymentCommandMessage.Payload p = message.payload();
         UUID bookingId = p != null && p.bookingId() != null ? p.bookingId() : message.aggregateId();
@@ -92,7 +106,7 @@ public class PaymentCommandListener {
         log.info("CANCEL_PAYMENT for booking {}: {} payment(s) cancelled", bookingId, cancelled);
     }
 
-    private CreatePaymentCommand toCommand(PaymentCommandMessage message) {
+    private static CreatePaymentCommand toCreateCommand(PaymentCommandMessage message) {
         PaymentCommandMessage.Payload p = message.payload();
         return CreatePaymentCommand.builder()
                 .commandId(message.commandId())

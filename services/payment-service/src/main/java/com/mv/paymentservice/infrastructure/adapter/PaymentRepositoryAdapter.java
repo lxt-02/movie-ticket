@@ -3,7 +3,6 @@ package com.mv.paymentservice.infrastructure.adapter;
 import com.mv.paymentservice.application.port.out.LoadPaymentPort;
 import com.mv.paymentservice.application.port.out.SavePaymentPort;
 import com.mv.paymentservice.domain.model.payment.aggregate.Payment;
-import com.mv.paymentservice.domain.model.payment.enums.PaymentStatus;
 import com.mv.paymentservice.infrastructure.persistence.entity.PaymentEntity;
 import com.mv.paymentservice.infrastructure.persistence.mapper.PaymentPersistenceMapper;
 import com.mv.paymentservice.infrastructure.persistence.repository.PaymentJpaRepository;
@@ -18,8 +17,6 @@ import java.util.UUID;
 @Component
 @RequiredArgsConstructor
 public class PaymentRepositoryAdapter implements LoadPaymentPort, SavePaymentPort {
-
-    private static final List<PaymentStatus> ACTIVE_STATUSES = List.of(PaymentStatus.PENDING, PaymentStatus.PROCESSING);
 
     private final PaymentJpaRepository paymentJpaRepository;
     private final PaymentPersistenceMapper mapper;
@@ -38,13 +35,6 @@ public class PaymentRepositoryAdapter implements LoadPaymentPort, SavePaymentPor
     @Override
     public Optional<Payment> findByIdempotencyKey(String idempotencyKey) {
         return paymentJpaRepository.findFirstByIdempotencyKeyOrderByCreatedAtDesc(idempotencyKey).map(mapper::toDomain);
-    }
-
-    @Override
-    public Optional<Payment> findActiveByBookingId(UUID bookingId) {
-        return paymentJpaRepository
-                .findFirstByBookingIdAndPaymentStatusInOrderByCreatedAtDesc(bookingId, ACTIVE_STATUSES)
-                .map(mapper::toDomain);
     }
 
     @Override

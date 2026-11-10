@@ -138,6 +138,9 @@ services:
     environment:
       discovery.type: single-node
       xpack.security.enabled: "false"
+      # Never let Elasticsearch auto-create the movie index with a guessed mapping (id would become "text" and
+      # every search fails with "Fielddata is disabled on [id]"); search-service creates it from movies-index.json.
+      action.auto_create_index: "-movies*,+*"
       ES_JAVA_OPTS: "-Xms512m -Xmx512m"
     volumes:
       - es-data:/usr/share/elasticsearch/data
@@ -345,6 +348,25 @@ services:
       - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
+
+  # Public HTTPS tunnel to the gateway, so PayOS can call the webhook on a local machine.
+  # Needs NGROK_AUTHTOKEN in the root .env (https://dashboard.ngrok.com/get-started/your-authtoken).
+  # Start: docker compose --profile app --profile ngrok up -d
+  # Public URL + request log: http://localhost:4040
+  # PayOS webhook URL: https://<public-url>/api/v1/payments/payos/webhook
+  # Gateway run from the IDE instead of Docker: NGROK_UPSTREAM=host.docker.internal:8080
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: ngrok
+    profiles: ["ngrok"]
+    command: ["http", "${NGROK_UPSTREAM:-api-gateway:8080}", "--log", "stdout"]
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+    ports:
+      - "4040:4040"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
 
 volumes:
   redis-data:

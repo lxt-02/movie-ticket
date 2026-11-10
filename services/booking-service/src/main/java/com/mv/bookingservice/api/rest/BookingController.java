@@ -84,7 +84,6 @@ public class BookingController {
     public ResponseEntity<ApiResponse<List<BookingResponse>>> getUserBookings(
             @RequestHeader(value = "X-User-Id") UUID headerUserId
     ) {
-        // Only the caller's own bookings: no ?userId= override.
         GetUserBookingsQuery query = GetUserBookingsQuery.builder()
                 .userId(headerUserId)
                 .build();
