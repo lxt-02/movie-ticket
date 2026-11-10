@@ -1,0 +1,179 @@
+server:
+  port: 8083
+
+spring:
+  config:
+    import:
+      # Load variables from this module's .env (run from module dir or from project root)
+      - optional:file:.env[.properties]
+      - optional:file:services/booking-service/.env[.properties]
+  application:
+    name: booking-service
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  cloud:
+    openfeign:
+      client:
+        config:
+          # Without timeouts a hung service blocks a DB transaction for 60s and the circuit breaker never sees
+          # a failure. Keys = @FeignClient names.
+          showtime-service:
+            connect-timeout: 2000
+            read-timeout: 5000
+          user-service:
+            connect-timeout: 2000
+            read-timeout: 3000
+          payment-service:
+            connect-timeout: 2000
+            read-timeout: 3000
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    # Trace context in Kafka headers: the consumer span joins the producer's trace.
+    template:
+      observation-enabled: true
+    listener:
+      observation-enabled: true
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        enable.idempotence: true
+        # Broker down / topic missing: send() gives up after 5s (Kafka default 60s held the relay transaction).
+        max.block.ms: 5000
+        request.timeout.ms: 4000
+        # The producer stops retrying after 8s, before the relay stops waiting (publish-timeout-ms 15s):
+        # no hidden late send after the relay already scheduled a retry (duplicate command).
+        delivery.timeout.ms: 8000
+    consumer:
+      group-id: booking-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+booking:
+  resilience:
+    circuit-breaker:
+      # Breakers "showtime" and "user". Only technical failures count (down, timeout, 5xx); 4xx answers do not.
+      sliding-window-size: 10           # failure rate computed over the last 10 calls
+      minimum-number-of-calls: 5        # no decision before 5 calls
+      failure-rate-threshold: 50        # >= 50% failed -> OPEN
+      wait-duration-in-open-seconds: 20 # OPEN rejects calls for 20s, then HALF_OPEN
+      permitted-calls-in-half-open: 3   # 3 trial calls; all OK -> CLOSED, any failure -> OPEN again
+    retry:
+      # Retry -> CircuitBreaker -> Bulkhead -> Feign. Only quick technical failures are retried:
+      # connection refused / 502 / 503 / 504. Never: read timeout (slow service), 4xx, breaker OPEN, bulkhead full.
+      max-attempts: 3                   # 1st try + 2 retries (1 = no retry)
+      wait-millis: 300                  # 300ms, then 600ms (exponential backoff)
+      multiplier: 2
+    bulkhead:
+      # At most 20 calls to showtime (and 20 to user) at the same time; others wait up to 500ms, then 503.
+      # A slow showtime can then never take every request thread of booking-service.
+      max-concurrent-calls: 20
+      max-wait-millis: 500
+  scheduling:
+    enabled: true
+  payment:
+    # Payment links per booking (first one included); "pay again" opens the next one.
+    max-attempts: 3
+    # Payment deadline (PayOS link expiry) = seat hold end - this margin. Must be > expiry.grace-seconds.
+    hold-safety-margin-seconds: 180
+  expiry:
+    # PENDING bookings are expired this long after expires_at, so a transfer made just before the deadline can land.
+    grace-seconds: 90
+    batch-size: 50
+    delay-ms: 30000
+    initial-delay-ms: 30000
+  confirmation-retry:
+    delay-ms: 60000
+    initial-delay-ms: 45000
+    # A paid booking whose seats still are not confirmed after this long is CANCELLED (logged for manual check).
+    timeout-minutes: 30
+  kafka:
+    payment-commands: payment-commands
+    payment-events: payment-events
+    relay-delay-ms: 2000
+    relay-initial-delay-ms: 3000
+    relay-batch-size: 50
+    # > max.block.ms (5s) + delivery.timeout.ms (8s), see spring.kafka.producer.properties
+    publish-timeout-ms: 15000
+    # Temporary publish error (broker down, topic missing): row stays PENDING, retried after 2s, 4s ... max 60s.
+    # Permanent error (no permission, record too large): row FAILED, other bookings continue.
+    # GET /api/v1/bookings/admin/outbox, POST /api/v1/bookings/admin/outbox/requeue-failed
+    relay-retry-initial-delay-ms: 2000
+    relay-retry-max-delay-ms: 60000
+    relay-alert-after-attempts: 10
+    # Startup check that payment-commands / payment-events exist (wrong name = ERROR in the log).
+    verify-topics: true
+    # A payment event that fails for a technical reason is retried (1s, 2s, 4s ... max 10s) for 60s,
+    # then parked in payment-events.DLT instead of being skipped. Replay: POST /api/v1/bookings/admin/payment-events-dlt/replay
+    event-retry-max-interval-ms: 10000
+    event-retry-max-elapsed-ms: ${BOOKING_EVENT_RETRY_MAX_ELAPSED_MS:60000}
+  demo:
+    # DEMO ONLY: allows POST /api/v1/bookings/admin/chaos/payment-events?fail=true (simulated outage). Keep false otherwise.
+    chaos-enabled: ${BOOKING_DEMO_CHAOS_ENABLED:false}
+
+clients:
+  showtime:
+    base-url: ${SHOWTIME_SERVICE_URL}
+  user:
+    base-url: ${USER_SERVICE_URL}
+  payment:
+    base-url: ${PAYMENT_SERVICE_URL:}
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE}
+  instance:
+    prefer-ip-address: true
+    # IP in the ID: several instances on the same port (docker compose --scale) stay distinct in Eureka.
+    instance-id: ${EUREKA_INSTANCE_ID:${spring.application.name}:${spring.cloud.client.ip-address}:${server.port}}
+
+logging:
+  pattern:
+    # Correlation ID of the request (X-Correlation-Id) in every log line
+    correlation: '[cid=%X{correlationId:-} trace=%X{traceId:-}] '
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  tracing:
+    sampling:
+      # Every request is traced (demo). Lower it in production (e.g. 0.1).
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}
+    export:
+      zipkin:
+        endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+  # Same setting under its Spring Boot 3 name (ignored if unknown).
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+  metrics:
+    tags:
+      # Every metric carries the service name (Grafana filter).
+      application: ${spring.application.name}

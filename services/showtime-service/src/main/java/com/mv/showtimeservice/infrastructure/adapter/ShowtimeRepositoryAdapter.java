@@ -1,0 +1,78 @@
+package com.mv.showtimeservice.infrastructure.adapter;
+
+import com.mv.showtimeservice.application.dto.PageResult;
+import com.mv.showtimeservice.application.port.out.ShowtimeRepositoryPort;
+import com.mv.showtimeservice.domain.model.showtime.enums.ShowtimeStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+
+import java.time.Instant;
+import java.util.Collection;
+import com.mv.showtimeservice.domain.model.showtime.aggregate.Showtime;
+import com.mv.showtimeservice.domain.repository.ShowtimeRepository;
+import com.mv.showtimeservice.infrastructure.persistence.entity.ShowtimeEntity;
+import com.mv.showtimeservice.infrastructure.persistence.mapper.ShowtimePersistenceMapper;
+import com.mv.showtimeservice.infrastructure.persistence.repository.ShowtimeJpaRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Component;
+
+import java.util.Optional;
+import java.util.UUID;
+
+@Component
+@RequiredArgsConstructor
+public class ShowtimeRepositoryAdapter implements ShowtimeRepository, ShowtimeRepositoryPort {
+
+    private final ShowtimeJpaRepository showtimeJpaRepository;
+    private final ShowtimePersistenceMapper mapper;
+
+    @Override
+    public Optional<Showtime> findById(UUID id) {
+        return showtimeJpaRepository.findById(id).map(mapper::toDomain);
+    }
+
+    @Override
+    public Optional<Showtime> findByIdWithLock(UUID id) {
+        return showtimeJpaRepository.findByIdWithLock(id).map(mapper::toDomain);
+    }
+
+    @Override
+    public boolean existsOverlapping(UUID screenId, Instant from, Instant to, UUID excludeShowtimeId) {
+        return showtimeJpaRepository.existsOverlapping(screenId, from, to, excludeShowtimeId, ShowtimeStatus.CANCELLED);
+    }
+
+    @Override
+    public int openSales(Instant opensBefore, Instant now) {
+        return showtimeJpaRepository.openSales(opensBefore, now, ShowtimeStatus.SCHEDULED, ShowtimeStatus.SELLING);
+    }
+
+    @Override
+    public int endFinished(Instant now) {
+        return showtimeJpaRepository.endFinished(now,
+                java.util.List.of(ShowtimeStatus.SCHEDULED, ShowtimeStatus.SELLING), ShowtimeStatus.ENDED);
+    }
+
+    private static final Instant SEARCH_MIN_TIME = Instant.parse("1970-01-01T00:00:00Z");
+    private static final Instant SEARCH_MAX_TIME = Instant.parse("9999-12-31T00:00:00Z");
+
+    @Override
+    public PageResult<Showtime> search(UUID movieId, UUID cinemaId, UUID screenId, Instant from, Instant to,
+                                       Collection<ShowtimeStatus> statuses, int page, int size) {
+        // Null bound = no bound. Never pass a null Instant: PostgreSQL cannot type it ("parameter $n").
+        Instant effectiveFrom = from != null ? from : SEARCH_MIN_TIME;
+        Instant effectiveTo = to != null ? to : SEARCH_MAX_TIME;
+        Page<ShowtimeEntity> result = showtimeJpaRepository.search(movieId, cinemaId, screenId,
+                effectiveFrom, effectiveTo, statuses,
+                PageRequest.of(page, size, Sort.by("startTime")));
+        return new PageResult<>(result.getContent().stream().map(mapper::toDomain).toList(),
+                page, size, result.getTotalElements());
+    }
+
+    @Override
+    public Showtime save(Showtime showtime) {
+        ShowtimeEntity entity = mapper.toEntity(showtime);
+        ShowtimeEntity saved = showtimeJpaRepository.save(entity);
+        return mapper.toDomain(saved);
+    }
+}
