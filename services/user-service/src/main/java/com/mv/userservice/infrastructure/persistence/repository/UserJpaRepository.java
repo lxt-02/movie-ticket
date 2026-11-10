@@ -17,12 +17,14 @@ public interface UserJpaRepository extends JpaRepository<UserEntity, UUID> {
             SELECT u FROM UserEntity u
             WHERE (:role IS NULL OR u.role = :role)
               AND (:status IS NULL OR u.status = :status)
-              AND (:keyword IS NULL
-                   OR LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%'))
-                   OR LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')))
+              AND (LOWER(u.email) LIKE :pattern OR LOWER(u.fullName) LIKE :pattern)
             """)
+    /**
+     * @param pattern lower-case LIKE pattern, never null ("%" = no keyword). A null String parameter is sent to
+     *                PostgreSQL as bytea and LOWER(bytea) fails, so the pattern is built in Java instead.
+     */
     org.springframework.data.domain.Page<UserEntity> search(
-            @org.springframework.data.repository.query.Param("keyword") String keyword,
+            @org.springframework.data.repository.query.Param("pattern") String pattern,
             @org.springframework.data.repository.query.Param("role")
             com.mv.userservice.domain.model.user.enums.UserRole role,
             @org.springframework.data.repository.query.Param("status")
