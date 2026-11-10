@@ -138,6 +138,9 @@ services:
     environment:
       discovery.type: single-node
       xpack.security.enabled: "false"
+      # Never let Elasticsearch auto-create the movie index with a guessed mapping (id would become "text" and
+      # every search fails with "Fielddata is disabled on [id]"); search-service creates it from movies-index.json.
+      action.auto_create_index: "-movies*,+*"
       ES_JAVA_OPTS: "-Xms512m -Xmx512m"
     volumes:
       - es-data:/usr/share/elasticsearch/data
