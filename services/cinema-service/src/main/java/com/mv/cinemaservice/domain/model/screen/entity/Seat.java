@@ -26,10 +26,6 @@ public class Seat {
     private String label;
     private SeatStatus status;
 
-    public boolean isUsable() {
-        return status == SeatStatus.ACTIVE;
-    }
-
     /** ACTIVE / BROKEN / INACTIVE. Only new showtimes see the change (existing ones copied the layout). */
     public void changeStatus(SeatStatus target) {
         if (target == null) {

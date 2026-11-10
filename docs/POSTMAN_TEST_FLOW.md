@@ -146,8 +146,10 @@ curl --location '{{base}}/api/v1/showtimes?movieId=20000000-0000-0000-0000-00000
 ```bash
 curl --location '{{base}}/api/v1/showtimes/50000000-0000-0000-0000-000000000001/seats'
 ```
-> Suất mẫu `50000000-...-0001` (Avatar, đang SELLING): A1, A2 đang bị giữ bởi booking mẫu; A3, A4, B1–B3 trống; B4 hỏng.
-> showtimeSeatId của ghế trống: A3 = `51000000-0000-0000-0000-000000000003`, A4 = `...0004`, B1 = `...0005`, B2 = `...0006`, B3 = `...0007`.
+> Suất mẫu `50000000-...-0001` (Dune, Landmark 81 Phòng 1, 20:00 ngày kia, SELLING; 90 ghế): E7, E8, G5–G8 đã bán
+> (booking mẫu); A8 hỏng; còn lại trống. showtimeSeatId = `51000000-0000-0000-0000-0000000000NN`, NN = A1=1 … A12=12, B1=13 …
+> Ví dụ ghế trống: A3 = `51000000-0000-0000-0000-000000000003`, A4 = `...0004`, A5 = `...0005`, A6 = `...0006`, A7 = `...0007`.
+> Chi tiết dữ liệu mẫu: `docs/DEMO_SEED.md`.
 
 ---
 
@@ -372,7 +374,7 @@ curl --location '{{base}}/api/v1/bookings/{{bookingId}}/cancel' \
 | 6.6 | 5.1 bằng `{{blockedToken}}` | 400 "Tài khoản không hoạt động hoặc đã bị khoá" |
 | 6.7 | 5.3 xem booking của customer bằng `{{staffToken}}` | 404 (không lộ booking của người khác) |
 | 6.8 | 5.4 huỷ lần 2 | 400 (booking không còn PENDING) |
-| 6.9 | Đặt ghế B4 của suất mẫu (`51000000-0000-0000-0000-000000000008`, ghế hỏng) | 409 "Ghế B4 vừa có người khác chọn" |
+| 6.9 | Đặt ghế A8 của suất mẫu (`51000000-0000-0000-0000-000000000008`, ghế hỏng) | 409 "Ghế A8 vừa có người khác chọn" |
 | 6.10 | Gửi 5.1 liên tục > 3 lần/giây | 429 (rate limit đặt vé theo user) |
 | 6.11 | 5.1 với `showtimeId` của suất còn SCHEDULED (vừa tạo ở 4.7, chưa tới 1 phút) | 409 "Suất chiếu hiện không mở đặt ghế" |
 

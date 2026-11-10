@@ -19,19 +19,17 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Publishes PENDING outbox_messages to their topic (movie-events) with their key (movieId), oldest first, then
- * marks them PUBLISHED.
- * <p>
- * Several movie-service instances: each run locks the single row of {@code outbox_relay_lock} with
- * {@code FOR UPDATE SKIP LOCKED}; an instance that does not get it skips the run, so events are not sent twice
- * and the events of one movie keep their order.
- * <p>
- * Publish error: the row stays PENDING with {@code retry_count}, {@code last_error} and a back-off
- * ({@code next_retry_at}: 2s, 4s, 8s ... max 60s). The run stops there (order kept); nothing is published until
- * that row is retried.
- * <p>
- * At-least-once: a crash between the Kafka ack and the commit re-sends the event; search-service handles it
- * idempotently (upsert by movie id, versioned by updatedAt).
+ * Outbox relay của movie-service: gửi các dòng PENDING trong {@code outbox_messages} lên topic movie-events
+ * (key = movieId), cũ nhất trước, rồi đánh dấu PUBLISHED.
+ * <ul>
+ *     <li><b>Nhiều instance</b>: mỗi lượt giữ khoá {@code outbox_relay_lock} ({@code FOR UPDATE SKIP LOCKED});
+ *     instance không giữ được khoá bỏ lượt, nên event không bị gửi trùng và các event của một phim giữ thứ tự.</li>
+ *     <li><b>Gửi lỗi</b>: dòng vẫn PENDING, tăng {@code retry_count}, ghi {@code last_error}, hẹn
+ *     {@code next_retry_at} (2s, 4s, 8s ... tối đa 60s). Dừng lượt tại đó: không gửi gì thêm cho tới khi dòng này
+ *     được thử lại (giữ thứ tự).</li>
+ *     <li><b>At-least-once</b>: sập giữa lúc Kafka ack và lúc commit thì event được gửi lại; search-service xử lý
+ *     idempotent (upsert theo movieId, so phiên bản theo updatedAt).</li>
+ * </ul>
  */
 @Slf4j
 @Component
@@ -64,6 +62,7 @@ public class MovieOutboxRelay {
         this.clock = clock;
     }
 
+    /** Một lượt chạy: giữ khoá → gửi lô PENDING. */
     @Scheduled(
             fixedDelayString = "${movie.kafka.relay-delay-ms:2000}",
             initialDelayString = "${movie.kafka.relay-initial-delay-ms:5000}"
@@ -78,7 +77,7 @@ public class MovieOutboxRelay {
         });
     }
 
-    /** Row lock held until the transaction ends. */
+    /** Giữ khoá dòng {@code outbox_relay_lock} tới hết transaction; instance khác đang giữ thì trả false ngay. */
     private boolean tryLock() {
         List<?> locked = entityManager
                 .createNativeQuery("SELECT name FROM outbox_relay_lock WHERE name = :name FOR UPDATE SKIP LOCKED")
@@ -87,35 +86,55 @@ public class MovieOutboxRelay {
         return !locked.isEmpty();
     }
 
-    /** Never throws: the outcome of every attempted row is saved when the transaction commits. */
+    /**
+     * Gửi lần lượt; dừng ở dòng đầu tiên chưa gửi được (để giữ thứ tự). Không bao giờ ném lỗi: kết quả từng dòng
+     * được lưu khi transaction commit.
+     */
     void publishBatch() {
         Instant now = clock.instant();
         List<OutboxMessageInfraEntity> pending = repository.findPending(PageRequest.of(0, properties.relayBatchSize()));
         for (OutboxMessageInfraEntity message : pending) {
-            if (message.getNextRetryAt() != null && message.getNextRetryAt().isAfter(now)) {
-                // Oldest row still in back-off: later rows wait (order kept).
+            if (isWaitingForRetry(message, now)) {
                 return;
             }
-            try {
-                kafkaTemplate.send(message.getTopic(), message.getMessageKey(), message.getPayload())
-                        .get(properties.publishTimeoutMs(), TimeUnit.MILLISECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
-            } catch (Exception e) {
-                markForRetry(message, e, now);
+            if (!send(message, now)) {
                 return;
             }
-            log.info("Kafka SEND topic={} key={} type={}", message.getTopic(), message.getMessageKey(),
-                    message.getEventType());
-            message.setStatus(OutboxMessageStatus.PUBLISHED.name());
-            message.setPublishedAt(clock.instant());
-            message.setNextRetryAt(null);
-            message.setLastError(null);
-            repository.save(message);
         }
     }
 
+    /** Dòng đã lỗi trước đó và chưa tới giờ thử lại. */
+    private static boolean isWaitingForRetry(OutboxMessageInfraEntity message, Instant now) {
+        return message.getNextRetryAt() != null && message.getNextRetryAt().isAfter(now);
+    }
+
+    /** Gửi một message, chờ ack, ghi kết quả. Trả {@code false} nếu chưa gửi được (lượt phải dừng). */
+    private boolean send(OutboxMessageInfraEntity message, Instant now) {
+        try {
+            kafkaTemplate.send(message.getTopic(), message.getMessageKey(), message.getPayload())
+                    .get(properties.publishTimeoutMs(), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (Exception e) {
+            markForRetry(message, e, now);
+            return false;
+        }
+        markPublished(message);
+        return true;
+    }
+
+    private void markPublished(OutboxMessageInfraEntity message) {
+        log.info("Kafka SEND topic={} key={} type={}", message.getTopic(), message.getMessageKey(),
+                message.getEventType());
+        message.setStatus(OutboxMessageStatus.PUBLISHED.name());
+        message.setPublishedAt(clock.instant());
+        message.setNextRetryAt(null);
+        message.setLastError(null);
+        repository.save(message);
+    }
+
+    /** Vẫn PENDING, hẹn giờ thử lại theo back-off. */
     private void markForRetry(OutboxMessageInfraEntity message, Exception error, Instant now) {
         int attempts = message.getRetryCount() + 1;
         Duration delay = backOff(attempts);
@@ -127,12 +146,13 @@ public class MovieOutboxRelay {
                 message.getId(), message.getEventType(), attempts, delay.toSeconds(), message.getLastError());
     }
 
-    /** 2s, 4s, 8s ... capped at 60s. */
+    /** 2s, 4s, 8s ... tối đa 60s. */
     static Duration backOff(int attempts) {
         long delay = RETRY_INITIAL_DELAY.toMillis() << Math.min(Math.max(attempts - 1, 0), 20);
         return Duration.ofMillis(Math.min(delay, RETRY_MAX_DELAY.toMillis()));
     }
 
+    /** "Tên lỗi gốc: message", cắt còn {@link #MAX_ERROR_LENGTH} ký tự. */
     private static String describe(Throwable error) {
         Throwable cause = error;
         while (cause.getCause() != null && cause.getCause() != cause) {
