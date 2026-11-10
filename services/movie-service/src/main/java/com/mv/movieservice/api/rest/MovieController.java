@@ -33,8 +33,9 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.UUID;
 
 /**
- * Public movie catalogue (GET) and admin management (POST / PUT / PATCH / DELETE, header X-User-Role: ADMIN).
- * Archived movies are hidden from non-admins.
+ * Public movie catalogue (GET) and admin management (POST / PUT / PATCH / DELETE).
+ *
+ * @author giathanh795
  */
 @RestController
 @RequestMapping("/api/v1/movies")
@@ -50,10 +51,8 @@ public class MovieController {
             @RequestParam(required = false) MovieStatus status,
             @RequestParam(required = false, name = "q") String keyword,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size
-    ) {
+            @RequestParam(defaultValue = "20") int size) {
         boolean admin = AdminAccess.isAdmin();
-        // Non-admins never see archived movies, even when asking for them.
         MovieStatus effectiveStatus = !admin && status == MovieStatus.ARCHIVED ? null : status;
         var result = getMovieUseCase.search(SearchMoviesQuery.builder()
                 .status(effectiveStatus)
@@ -66,9 +65,7 @@ public class MovieController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<MovieResponse>> getById(
-            @PathVariable UUID id
-    ) {
+    public ResponseEntity<ApiResponse<MovieResponse>> getById(@PathVariable("id") UUID id) {
         Movie movie = getMovieUseCase.getById(new GetMovieQuery(id));
         if (movie.isArchived() && !AdminAccess.isAdmin()) {
             throw new MovieNotFoundException(id);
@@ -77,9 +74,7 @@ public class MovieController {
     }
 
     @PostMapping
-    public ResponseEntity<ApiResponse<MovieResponse>> create(
-            @Valid @RequestBody MovieRequest request
-    ) {
+    public ResponseEntity<ApiResponse<MovieResponse>> create(@Valid @RequestBody MovieRequest request) {
         AdminAccess.require();
         Movie movie = manageMovieUseCase.create(toCommand(request));
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -88,9 +83,8 @@ public class MovieController {
 
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<MovieResponse>> update(
-            @PathVariable UUID id,
-            @Valid @RequestBody MovieRequest request
-    ) {
+            @PathVariable("id") UUID id,
+            @Valid @RequestBody MovieRequest request) {
         AdminAccess.require();
         Movie movie = manageMovieUseCase.update(id, toCommand(request));
         return ResponseEntity.ok(ApiResponse.success("Movie updated", movieDtoMapper.toResponse(movie)));
@@ -98,19 +92,15 @@ public class MovieController {
 
     @PatchMapping("/{id}/status")
     public ResponseEntity<ApiResponse<MovieResponse>> changeStatus(
-            @PathVariable UUID id,
-            @Valid @RequestBody StatusRequest request
-    ) {
+            @PathVariable("id") UUID id,
+            @Valid @RequestBody StatusRequest request) {
         AdminAccess.require();
         Movie movie = manageMovieUseCase.changeStatus(id, request.getStatus());
         return ResponseEntity.ok(ApiResponse.success("Movie status changed", movieDtoMapper.toResponse(movie)));
     }
 
-    /** Soft delete: the movie is ARCHIVED, existing showtimes / bookings are untouched. */
     @DeleteMapping("/{id}")
-    public ResponseEntity<ApiResponse<MovieResponse>> archive(
-            @PathVariable UUID id
-    ) {
+    public ResponseEntity<ApiResponse<MovieResponse>> archive(@PathVariable("id") UUID id) {
         AdminAccess.require();
         Movie movie = manageMovieUseCase.archive(id);
         return ResponseEntity.ok(ApiResponse.success("Movie archived", movieDtoMapper.toResponse(movie)));
