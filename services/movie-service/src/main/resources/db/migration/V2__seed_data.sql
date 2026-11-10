@@ -1,123 +1,95 @@
--- Demo movies, genres, people and crew (Vietnamese titles included for the search demo).
-
-INSERT INTO movies (
-    id,
-    title,
-    original_title,
-    description,
-    duration_minutes,
-    release_date,
-    age_rating,
-    language,
-    country,
-    poster_url,
-    status
-) VALUES
-    (
-        '20000000-0000-0000-0000-000000000001',
-        'Avatar: The Way of Water',
-        'Avatar: The Way of Water',
-        'Jake Sully and Neytiri explore new regions of Pandora with their family.',
-        192,
-        '2022-12-16',
-        'T13',
-        'English',
-        'United States',
-        'https://example.com/posters/avatar-the-way-of-water.jpg',
-        'NOW_SHOWING'
-    ),
-    (
-        '20000000-0000-0000-0000-000000000002',
-        'Dune: Part Two',
-        'Dune: Part Two',
-        'Paul Atreides joins the Fremen while seeking justice for House Atreides.',
-        166,
-        '2024-03-01',
-        'T16',
-        'English',
-        'United States',
-        'https://example.com/posters/dune-part-two.jpg',
-        'NOW_SHOWING'
-    ),
-    (
-        '20000000-0000-0000-0000-000000000003',
-        'Inside Out 2',
-        'Inside Out 2',
-        'Riley grows up and meets new emotions.',
-        96,
-        '2024-06-14',
-        'P',
-        'English',
-        'United States',
-        'https://example.com/posters/inside-out-2.jpg',
-        'COMING_SOON'
-    );
+-- =====================================================================================================
+-- movie-service demo data.
+--   Movie ids 20000000-0000-0000-0000-0000000000NN are used by showtime-service and booking-service seeds.
+--   NOW_SHOWING  : 01..07 (have showtimes)   ENDED: 08   COMING_SOON: 09, 10 (release date = migration day + N)
+--   search-service is filled automatically: movie-service re-publishes every movie on startup.
+-- =====================================================================================================
 
 INSERT INTO genres (id, name) VALUES
-    ('21000000-0000-0000-0000-000000000001', 'Science Fiction'),
-    ('21000000-0000-0000-0000-000000000002', 'Adventure'),
-    ('21000000-0000-0000-0000-000000000003', 'Animation');
+    ('21000000-0000-0000-0000-000000000001', 'Khoa học viễn tưởng'),
+    ('21000000-0000-0000-0000-000000000002', 'Phiêu lưu'),
+    ('21000000-0000-0000-0000-000000000003', 'Hoạt hình'),
+    ('21000000-0000-0000-0000-000000000004', 'Hành động'),
+    ('21000000-0000-0000-0000-000000000005', 'Chính kịch'),
+    ('21000000-0000-0000-0000-000000000006', 'Hài'),
+    ('21000000-0000-0000-0000-000000000007', 'Gia đình'),
+    ('21000000-0000-0000-0000-000000000008', 'Tình cảm'),
+    ('21000000-0000-0000-0000-000000000009', 'Kinh dị'),
+    ('21000000-0000-0000-0000-000000000010', 'Lịch sử');
+
+INSERT INTO movies (id, title, original_title, description, duration_minutes, release_date, age_rating,
+                    language, country, poster_url, status) VALUES
+    ('20000000-0000-0000-0000-000000000001', 'Avatar: Dòng Chảy Của Nước', 'Avatar: The Way of Water',
+     'Jake Sully và Neytiri cùng các con rời rừng sâu, tìm nơi trú ẩn ở vùng biển của Pandora khi hiểm hoạ cũ quay lại.',
+     192, '2022-12-16', 'T13', 'Tiếng Anh', 'Mỹ',
+     'https://placehold.co/400x600/0f2a3d/7fd3ff/png?text=Avatar', 'NOW_SHOWING'),
+    ('20000000-0000-0000-0000-000000000002', 'Dune: Hành Tinh Cát – Phần Hai', 'Dune: Part Two',
+     'Paul Atreides gia nhập người Fremen trên hành tinh sa mạc Arrakis và bước vào con đường trả thù cho gia tộc.',
+     166, '2024-03-01', 'T16', 'Tiếng Anh', 'Mỹ',
+     'https://placehold.co/400x600/3d2a12/f2c06d/png?text=Dune+Part+Two', 'NOW_SHOWING'),
+    ('20000000-0000-0000-0000-000000000003', 'Những Mảnh Ghép Cảm Xúc 2', 'Inside Out 2',
+     'Riley bước vào tuổi mới lớn, và trung tâm điều khiển cảm xúc đón thêm những vị khách hoàn toàn mới.',
+     96, '2024-06-14', 'P', 'Tiếng Anh', 'Mỹ',
+     'https://placehold.co/400x600/3a1f4d/ffd36b/png?text=Inside+Out+2', 'NOW_SHOWING'),
+    ('20000000-0000-0000-0000-000000000004', 'Lật Mặt 7: Một Điều Ước', 'Lật Mặt 7: Một Điều Ước',
+     'Câu chuyện về người mẹ già và những người con trưởng thành, mỗi người một ngả, cùng một điều ước đoàn viên.',
+     138, '2024-04-26', 'K', 'Tiếng Việt', 'Việt Nam',
+     'https://placehold.co/400x600/4a1a1a/ffb3a1/png?text=Lat+Mat+7', 'NOW_SHOWING'),
+    ('20000000-0000-0000-0000-000000000005', 'Mai', 'Mai',
+     'Mai, người phụ nữ mang nhiều tổn thương, gặp Dương và dần mở lòng với một mối tình mới giữa Sài Gòn.',
+     131, '2024-02-10', 'T18', 'Tiếng Việt', 'Việt Nam',
+     'https://placehold.co/400x600/2d1b2e/f7a8c8/png?text=Mai', 'NOW_SHOWING'),
+    ('20000000-0000-0000-0000-000000000006', 'Doraemon: Nobita và Bản Giao Hưởng Địa Cầu', 'Doraemon: Nobita''s Earth Symphony',
+     'Nhóm bạn Nobita cùng Doraemon dùng âm nhạc để cứu Trái Đất khỏi một thế lực xoá sổ mọi giai điệu.',
+     115, '2024-05-24', 'P', 'Tiếng Nhật', 'Nhật Bản',
+     'https://placehold.co/400x600/0d3b66/9ad7ff/png?text=Doraemon', 'NOW_SHOWING'),
+    ('20000000-0000-0000-0000-000000000007', 'Đào, Phở và Piano', 'Đào, Phở và Piano',
+     'Hà Nội những ngày cuối năm 1946: một anh tự vệ, một cô tiểu thư và cây đàn piano giữa khói lửa.',
+     100, '2024-02-10', 'T13', 'Tiếng Việt', 'Việt Nam',
+     'https://placehold.co/400x600/2b2b1a/e8d48a/png?text=Dao+Pho+va+Piano', 'NOW_SHOWING'),
+    ('20000000-0000-0000-0000-000000000008', 'Godzilla x Kong: Đế Chế Mới', 'Godzilla x Kong: The New Empire',
+     'Godzilla và Kong buộc phải hợp sức trước một mối đe doạ ẩn sâu trong lòng Trái Đất.',
+     115, '2024-03-29', 'T13', 'Tiếng Anh', 'Mỹ',
+     'https://placehold.co/400x600/1a2e1a/9be39b/png?text=Godzilla+x+Kong', 'ENDED'),
+    ('20000000-0000-0000-0000-000000000009', 'Mùa Hè Ở Hội An', 'Mùa Hè Ở Hội An',
+     'Phim demo (hư cấu): hai người bạn cũ gặp lại nhau trong mùa đèn lồng và một bí mật bị bỏ quên.',
+     112, ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + 21), 'T13', 'Tiếng Việt', 'Việt Nam',
+     'https://placehold.co/400x600/5a3a10/ffd27a/png?text=Mua+He+O+Hoi+An', 'COMING_SOON'),
+    ('20000000-0000-0000-0000-000000000010', 'Chuyến Tàu Cuối Cùng', 'The Last Train',
+     'Phim demo (hư cấu): một đêm mất điện trên chuyến tàu Bắc – Nam, và những hành khách không như vẻ ngoài.',
+     104, ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + 35), 'T16', 'Tiếng Việt', 'Việt Nam',
+     'https://placehold.co/400x600/1a1a2e/c0c0ff/png?text=Chuyen+Tau+Cuoi', 'COMING_SOON');
 
 INSERT INTO movie_genres (movie_id, genre_id) VALUES
     ('20000000-0000-0000-0000-000000000001', '21000000-0000-0000-0000-000000000001'),
     ('20000000-0000-0000-0000-000000000001', '21000000-0000-0000-0000-000000000002'),
+    ('20000000-0000-0000-0000-000000000001', '21000000-0000-0000-0000-000000000004'),
     ('20000000-0000-0000-0000-000000000002', '21000000-0000-0000-0000-000000000001'),
-    ('20000000-0000-0000-0000-000000000002', '21000000-0000-0000-0000-000000000002'),
-    ('20000000-0000-0000-0000-000000000003', '21000000-0000-0000-0000-000000000003');
+    ('20000000-0000-0000-0000-000000000002', '21000000-0000-0000-0000-000000000004'),
+    ('20000000-0000-0000-0000-000000000002', '21000000-0000-0000-0000-000000000005'),
+    ('20000000-0000-0000-0000-000000000003', '21000000-0000-0000-0000-000000000003'),
+    ('20000000-0000-0000-0000-000000000003', '21000000-0000-0000-0000-000000000006'),
+    ('20000000-0000-0000-0000-000000000003', '21000000-0000-0000-0000-000000000007'),
+    ('20000000-0000-0000-0000-000000000004', '21000000-0000-0000-0000-000000000005'),
+    ('20000000-0000-0000-0000-000000000004', '21000000-0000-0000-0000-000000000007'),
+    ('20000000-0000-0000-0000-000000000005', '21000000-0000-0000-0000-000000000005'),
+    ('20000000-0000-0000-0000-000000000005', '21000000-0000-0000-0000-000000000008'),
+    ('20000000-0000-0000-0000-000000000006', '21000000-0000-0000-0000-000000000003'),
+    ('20000000-0000-0000-0000-000000000006', '21000000-0000-0000-0000-000000000002'),
+    ('20000000-0000-0000-0000-000000000006', '21000000-0000-0000-0000-000000000007'),
+    ('20000000-0000-0000-0000-000000000007', '21000000-0000-0000-0000-000000000010'),
+    ('20000000-0000-0000-0000-000000000007', '21000000-0000-0000-0000-000000000005'),
+    ('20000000-0000-0000-0000-000000000007', '21000000-0000-0000-0000-000000000008'),
+    ('20000000-0000-0000-0000-000000000008', '21000000-0000-0000-0000-000000000004'),
+    ('20000000-0000-0000-0000-000000000008', '21000000-0000-0000-0000-000000000001'),
+    ('20000000-0000-0000-0000-000000000009', '21000000-0000-0000-0000-000000000008'),
+    ('20000000-0000-0000-0000-000000000009', '21000000-0000-0000-0000-000000000005'),
+    ('20000000-0000-0000-0000-000000000010', '21000000-0000-0000-0000-000000000009');
 
 INSERT INTO persons (id, name, avatar_url, biography) VALUES
-    (
-        '22000000-0000-0000-0000-000000000001',
-        'James Cameron',
-        'https://example.com/people/james-cameron.jpg',
-        'Director and writer known for large-scale science fiction films.'
-    ),
-    (
-        '22000000-0000-0000-0000-000000000002',
-        'Denis Villeneuve',
-        'https://example.com/people/denis-villeneuve.jpg',
-        'Director known for visually rich science fiction and drama films.'
-    ),
-    (
-        '22000000-0000-0000-0000-000000000003',
-        'Kelsey Mann',
-        'https://example.com/people/kelsey-mann.jpg',
-        'Animation director.'
-    );
-
-INSERT INTO movie_crew (movie_id, person_id, role, character_name) VALUES
-    ('20000000-0000-0000-0000-000000000001', '22000000-0000-0000-0000-000000000001', 'DIRECTOR', NULL),
-    ('20000000-0000-0000-0000-000000000002', '22000000-0000-0000-0000-000000000002', 'DIRECTOR', NULL),
-    ('20000000-0000-0000-0000-000000000003', '22000000-0000-0000-0000-000000000003', 'DIRECTOR', NULL);
-
-INSERT INTO trailers (id, movie_id, title, video_url, thumbnail_url, is_primary) VALUES
-    (
-        '23000000-0000-0000-0000-000000000001',
-        '20000000-0000-0000-0000-000000000001',
-        'Official Trailer',
-        'https://example.com/trailers/avatar-the-way-of-water.mp4',
-        'https://example.com/trailers/avatar-the-way-of-water.jpg',
-        TRUE
-    ),
-    (
-        '23000000-0000-0000-0000-000000000002',
-        '20000000-0000-0000-0000-000000000002',
-        'Official Trailer',
-        'https://example.com/trailers/dune-part-two.mp4',
-        'https://example.com/trailers/dune-part-two.jpg',
-        TRUE
-    );
-
--- 3. Seed data
-INSERT INTO genres (id, name) VALUES
-    ('21000000-0000-0000-0000-000000000004', 'Action'),
-    ('21000000-0000-0000-0000-000000000005', 'Drama'),
-    ('21000000-0000-0000-0000-000000000006', 'Comedy'),
-    ('21000000-0000-0000-0000-000000000007', 'Family'),
-    ('21000000-0000-0000-0000-000000000008', 'Romance'),
-    ('21000000-0000-0000-0000-000000000009', 'Horror');
-
-INSERT INTO persons (id, name, avatar_url, biography) VALUES
+    ('22000000-0000-0000-0000-000000000001', 'James Cameron', NULL, 'Đạo diễn, biên kịch phim khoa học viễn tưởng quy mô lớn.'),
+    ('22000000-0000-0000-0000-000000000002', 'Denis Villeneuve', NULL, 'Đạo diễn người Canada.'),
+    ('22000000-0000-0000-0000-000000000003', 'Kelsey Mann', NULL, 'Đạo diễn phim hoạt hình.'),
     ('22000000-0000-0000-0000-000000000004', 'Sam Worthington', NULL, NULL),
     ('22000000-0000-0000-0000-000000000005', 'Zoe Saldaña', NULL, NULL),
     ('22000000-0000-0000-0000-000000000006', 'Timothée Chalamet', NULL, NULL),
@@ -125,40 +97,33 @@ INSERT INTO persons (id, name, avatar_url, biography) VALUES
     ('22000000-0000-0000-0000-000000000008', 'Amy Poehler', NULL, NULL),
     ('22000000-0000-0000-0000-000000000009', 'Lý Hải', NULL, 'Đạo diễn loạt phim Lật Mặt.'),
     ('22000000-0000-0000-0000-000000000010', 'Trấn Thành', NULL, 'Đạo diễn, diễn viên.'),
-    ('22000000-0000-0000-0000-000000000011', 'Phương Anh Đào', NULL, NULL);
-
-INSERT INTO movies (id, title, original_title, description, duration_minutes, release_date, age_rating,
-                    language, country, poster_url, status) VALUES
-    ('20000000-0000-0000-0000-000000000004',
-     'Lật Mặt 7: Một Điều Ước',
-     'Lật Mặt 7: Một Điều Ước',
-     'Câu chuyện gia đình về người mẹ già và những người con trưởng thành mỗi người một ngả.',
-     138, '2024-04-26', 'K', 'Vietnamese', 'Vietnam',
-     'https://example.com/posters/lat-mat-7.jpg', 'NOW_SHOWING'),
-    ('20000000-0000-0000-0000-000000000005',
-     'Mai',
-     'Mai',
-     'Mai, một người phụ nữ làm nghề mát-xa, gặp Dương và dần mở lòng với một mối tình mới.',
-     131, '2024-02-10', 'T18', 'Vietnamese', 'Vietnam',
-     'https://example.com/posters/mai.jpg', 'NOW_SHOWING');
-
-INSERT INTO movie_genres (movie_id, genre_id) VALUES
-    ('20000000-0000-0000-0000-000000000001', '21000000-0000-0000-0000-000000000004'),
-    ('20000000-0000-0000-0000-000000000002', '21000000-0000-0000-0000-000000000004'),
-    ('20000000-0000-0000-0000-000000000002', '21000000-0000-0000-0000-000000000005'),
-    ('20000000-0000-0000-0000-000000000003', '21000000-0000-0000-0000-000000000006'),
-    ('20000000-0000-0000-0000-000000000003', '21000000-0000-0000-0000-000000000007'),
-    ('20000000-0000-0000-0000-000000000004', '21000000-0000-0000-0000-000000000005'),
-    ('20000000-0000-0000-0000-000000000004', '21000000-0000-0000-0000-000000000007'),
-    ('20000000-0000-0000-0000-000000000005', '21000000-0000-0000-0000-000000000005'),
-    ('20000000-0000-0000-0000-000000000005', '21000000-0000-0000-0000-000000000008');
+    ('22000000-0000-0000-0000-000000000011', 'Phương Anh Đào', NULL, NULL),
+    ('22000000-0000-0000-0000-000000000012', 'Thanh Hiền', NULL, NULL),
+    ('22000000-0000-0000-0000-000000000013', 'Tuấn Trần', NULL, NULL),
+    ('22000000-0000-0000-0000-000000000014', 'Kazuaki Imai', NULL, 'Đạo diễn phim hoạt hình Nhật Bản.'),
+    ('22000000-0000-0000-0000-000000000015', 'Phi Tiến Sơn', NULL, 'Đạo diễn.'),
+    ('22000000-0000-0000-0000-000000000016', 'Doãn Quốc Đam', NULL, NULL),
+    ('22000000-0000-0000-0000-000000000017', 'Cao Thùy Linh', NULL, NULL),
+    ('22000000-0000-0000-0000-000000000018', 'Adam Wingard', NULL, 'Đạo diễn.'),
+    ('22000000-0000-0000-0000-000000000019', 'Rebecca Hall', NULL, NULL);
 
 INSERT INTO movie_crew (movie_id, person_id, role, character_name) VALUES
+    ('20000000-0000-0000-0000-000000000001', '22000000-0000-0000-0000-000000000001', 'DIRECTOR', NULL),
     ('20000000-0000-0000-0000-000000000001', '22000000-0000-0000-0000-000000000004', 'ACTOR', 'Jake Sully'),
     ('20000000-0000-0000-0000-000000000001', '22000000-0000-0000-0000-000000000005', 'ACTOR', 'Neytiri'),
+    ('20000000-0000-0000-0000-000000000002', '22000000-0000-0000-0000-000000000002', 'DIRECTOR', NULL),
     ('20000000-0000-0000-0000-000000000002', '22000000-0000-0000-0000-000000000006', 'ACTOR', 'Paul Atreides'),
     ('20000000-0000-0000-0000-000000000002', '22000000-0000-0000-0000-000000000007', 'ACTOR', 'Chani'),
+    ('20000000-0000-0000-0000-000000000003', '22000000-0000-0000-0000-000000000003', 'DIRECTOR', NULL),
     ('20000000-0000-0000-0000-000000000003', '22000000-0000-0000-0000-000000000008', 'ACTOR', 'Joy'),
     ('20000000-0000-0000-0000-000000000004', '22000000-0000-0000-0000-000000000009', 'DIRECTOR', NULL),
+    ('20000000-0000-0000-0000-000000000004', '22000000-0000-0000-0000-000000000012', 'ACTOR', 'Bà Hai'),
     ('20000000-0000-0000-0000-000000000005', '22000000-0000-0000-0000-000000000010', 'DIRECTOR', NULL),
-    ('20000000-0000-0000-0000-000000000005', '22000000-0000-0000-0000-000000000011', 'ACTOR', 'Mai');
+    ('20000000-0000-0000-0000-000000000005', '22000000-0000-0000-0000-000000000011', 'ACTOR', 'Mai'),
+    ('20000000-0000-0000-0000-000000000005', '22000000-0000-0000-0000-000000000013', 'ACTOR', 'Dương'),
+    ('20000000-0000-0000-0000-000000000006', '22000000-0000-0000-0000-000000000014', 'DIRECTOR', NULL),
+    ('20000000-0000-0000-0000-000000000007', '22000000-0000-0000-0000-000000000015', 'DIRECTOR', NULL),
+    ('20000000-0000-0000-0000-000000000007', '22000000-0000-0000-0000-000000000016', 'ACTOR', 'Văn Dân'),
+    ('20000000-0000-0000-0000-000000000007', '22000000-0000-0000-0000-000000000017', 'ACTOR', 'Thục Hương'),
+    ('20000000-0000-0000-0000-000000000008', '22000000-0000-0000-0000-000000000018', 'DIRECTOR', NULL),
+    ('20000000-0000-0000-0000-000000000008', '22000000-0000-0000-0000-000000000019', 'ACTOR', 'Ilene Andrews');
