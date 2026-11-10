@@ -1,0 +1,14 @@
+﻿<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="RUN ALL SERVICES" type="CompoundRunConfigurationType">
+    <toRun name="EurekaServiceApplication" type="Application" />
+    <toRun name="ApiGatewayApplication" type="Application" />
+    <toRun name="UserServiceApplication" type="Application" />
+    <toRun name="MovieServiceApplication" type="Application" />
+    <toRun name="CinemaServiceApplication" type="Application" />
+    <toRun name="ShowtimeServiceApplication" type="Application" />
+    <toRun name="BookingServiceApplication" type="Application" />
+    <toRun name="PaymentServiceApplication" type="Application" />
+    <toRun name="SearchServiceApplication" type="Application" />
+    <method v="2" />
+  </configuration>
+</component>

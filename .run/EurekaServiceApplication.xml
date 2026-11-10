@@ -1,0 +1,9 @@
+﻿<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="EurekaServiceApplication" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="com.mv.eurekaservice.EurekaServiceApplication" />
+    <module name="eureka-service" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
