@@ -15,6 +15,4 @@ public interface OutboxMessageJpaRepository extends JpaRepository<OutboxMessageI
     /** PENDING rows, oldest first (per-movie order is the insert order). */
     @Query("SELECT m FROM OutboxMessageInfraEntity m WHERE m.status = 'PENDING' ORDER BY m.createdAt ASC")
     List<OutboxMessageInfraEntity> findPending(Pageable pageable);
-
-    long countByStatus(String status);
 }

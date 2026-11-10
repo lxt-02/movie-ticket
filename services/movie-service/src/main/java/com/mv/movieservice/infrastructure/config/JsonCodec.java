@@ -26,12 +26,4 @@ public class JsonCodec {
             throw new IllegalStateException("Cannot serialize " + value.getClass().getSimpleName(), e);
         }
     }
-
-    public <T> T read(String json, Class<T> type) {
-        try {
-            return mapper.readValue(json, type);
-        } catch (JsonProcessingException e) {
-            throw new IllegalArgumentException("Malformed JSON for " + type.getSimpleName() + ": " + e.getOriginalMessage(), e);
-        }
-    }
 }

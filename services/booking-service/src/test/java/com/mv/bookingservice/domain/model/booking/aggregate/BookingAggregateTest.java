@@ -1,7 +1,6 @@
 package com.mv.bookingservice.domain.model.booking.aggregate;
 
 import com.mv.bookingservice.domain.model.booking.exception.BookingValidationException;
-import com.mv.bookingservice.domain.model.booking.exception.InvalidBookingStateException;
 import com.mv.bookingservice.domain.model.booking.entity.BookingSeat;
 import com.mv.bookingservice.domain.model.booking.enums.BookingSeatStatus;
 import com.mv.bookingservice.domain.model.booking.enums.BookingStatus;

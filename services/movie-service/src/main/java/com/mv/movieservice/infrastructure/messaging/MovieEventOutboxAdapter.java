@@ -19,18 +19,18 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Writes movie events into outbox_messages (aggregateType MOVIE); {@link MovieOutboxRelay} publishes them to Kafka.
+ * Ghi event phim vào bảng outbox_messages, cùng transaction với thay đổi phim; {@link MovieOutboxRelay} mới là bên
+ * gửi lên Kafka.
  * <p>
- * Message on topic {@code movie-events}, key = movieId (one movie always lands on the same partition, so its
- * events stay in order):
+ * Message trên topic {@code movie-events}, key = movieId (một phim luôn vào cùng partition nên event giữ thứ tự):
  * <pre>
  * { eventId, eventType, aggregateId, occurredAt, version,
  *   payload: { id, title, originalTitle, description, durationMinutes, releaseDate, ageRating, language, country,
  *              posterUrl, status, genres: [{id, name}], directors: [{id, name}],
  *              actors: [{id, name, characterName}], createdAt, updatedAt } }
  * </pre>
- * {@code version} = updatedAt in epoch milliseconds: consumers use it to ignore an older snapshot that arrives
- * after a newer one (resync racing a change, replay from a dead-letter topic).
+ * {@code version} = updatedAt tính bằng epoch milli: consumer dùng nó để bỏ qua bản cũ tới sau bản mới (đồng bộ lại
+ * chạy song song với một thay đổi, phát lại từ DLT).
  */
 @Component
 @RequiredArgsConstructor
@@ -43,6 +43,7 @@ public class MovieEventOutboxAdapter implements MovieEventPort {
     private final JsonCodec json;
     private final Clock clock;
 
+    /** Chụp toàn bộ thông tin phim (snapshot) thành message và lưu dòng PENDING. */
     @Override
     public void publish(Movie movie, MovieEventType type) {
         UUID eventId = UUID.randomUUID();
