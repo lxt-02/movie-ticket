@@ -37,8 +37,70 @@ class MovieIndexClientTest {
         client = new MovieIndexClient(builder.build(), new JsonCodec(), properties);
     }
 
+    private static final String GOOD_MAPPING =
+            "{\"movies\":{\"mappings\":{\"dynamic\":\"strict\",\"properties\":{\"id\":{\"type\":\"keyword\"}}}}}";
+    /** What Elasticsearch guesses when a document is written into a missing index. */
+    private static final String AUTO_CREATED_MAPPING =
+            "{\"movies\":{\"mappings\":{\"properties\":{\"id\":{\"type\":\"text\",\"fields\":{\"keyword\":{\"type\":\"keyword\"}}}}}}}";
+
     private void expectIndexExists() {
         server.expect(requestTo(ES + "/movies")).andExpect(method(HttpMethod.HEAD)).andRespond(withSuccess());
+        server.expect(requestTo(ES + "/movies/_mapping")).andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(GOOD_MAPPING, MediaType.APPLICATION_JSON));
+    }
+
+    private void expectIndexCreated() {
+        server.expect(requestTo(ES + "/movies")).andExpect(method(HttpMethod.PUT))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("\"strict\"")))
+                .andRespond(withSuccess("{\"acknowledged\":true}", MediaType.APPLICATION_JSON));
+    }
+
+    @Test
+    void recreatesAnIndexThatElasticsearchAutoCreatedWithTheWrongMapping() {
+        server.expect(requestTo(ES + "/movies")).andExpect(method(HttpMethod.HEAD)).andRespond(withSuccess());
+        server.expect(requestTo(ES + "/movies/_mapping")).andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(AUTO_CREATED_MAPPING, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(ES + "/movies")).andExpect(method(HttpMethod.DELETE))
+                .andRespond(withSuccess("{\"acknowledged\":true}", MediaType.APPLICATION_JSON));
+        expectIndexCreated();
+
+        client.ensureIndex();
+        client.ensureIndex(); // repaired once, then cached
+
+        server.verify();
+    }
+
+    @Test
+    void recreatesAMissingIndexAndRetriesTheWriteOnce() {
+        expectIndexExists();
+        server.expect(requestTo(ES + "/movies/_doc/m1?version=7&version_type=external_gte"))
+                .andExpect(method(HttpMethod.PUT))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND)
+                        .body("{\"error\":{\"type\":\"index_not_found_exception\"},\"status\":404}")
+                        .contentType(MediaType.APPLICATION_JSON));
+        server.expect(requestTo(ES + "/movies")).andExpect(method(HttpMethod.HEAD))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+        expectIndexCreated();
+        server.expect(requestTo(ES + "/movies/_doc/m1?version=7&version_type=external_gte"))
+                .andExpect(method(HttpMethod.PUT))
+                .andRespond(withSuccess("{\"result\":\"created\"}", MediaType.APPLICATION_JSON));
+
+        assertThat(client.upsert("m1", Map.of("id", "m1"), 7)).isTrue();
+        server.verify();
+    }
+
+    @Test
+    void recreateIndexDeletesThenCreates() {
+        server.expect(requestTo(ES + "/movies")).andExpect(method(HttpMethod.DELETE))
+                .andRespond(withSuccess("{\"acknowledged\":true}", MediaType.APPLICATION_JSON));
+        expectIndexCreated();
+        server.expect(requestTo(ES + "/movies/_search")).andExpect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{\"took\":1}", MediaType.APPLICATION_JSON));
+
+        client.recreateIndex();
+        client.search(new JsonCodec().object()); // no second check: index is known to be ready
+
+        server.verify();
     }
 
     @Test
