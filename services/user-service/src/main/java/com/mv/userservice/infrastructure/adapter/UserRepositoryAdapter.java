@@ -28,7 +28,10 @@ public class UserRepositoryAdapter implements UserRepository, LoadUserPort, com.
     public com.mv.userservice.application.dto.PageResult<User> search(String keyword,
             com.mv.userservice.domain.model.user.enums.UserRole role,
             com.mv.userservice.domain.model.user.enums.UserStatus status, int page, int size) {
-        var result = userJpaRepository.search(keyword, role, status,
+        String pattern = keyword == null || keyword.isBlank()
+                ? "%"
+                : "%" + keyword.trim().toLowerCase(java.util.Locale.ROOT) + "%";
+        var result = userJpaRepository.search(pattern, role, status,
                 org.springframework.data.domain.PageRequest.of(page, size,
                         org.springframework.data.domain.Sort.by("fullName")));
         return new com.mv.userservice.application.dto.PageResult<>(
