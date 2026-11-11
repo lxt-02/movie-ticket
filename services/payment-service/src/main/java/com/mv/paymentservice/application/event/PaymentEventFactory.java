@@ -12,6 +12,8 @@ import java.util.UUID;
 /**
  * Builds the payloads of the payment-events contract (see rule/payment/payment_service_payos.md, section 5.2).
  */
+// [VI] Nơi dựng payload của mọi event gửi sang booking. Tên field ở đây chính là hợp đồng với booking
+// (đối chiếu các file payment-*.json trong contracts/booking-payment/).
 public final class PaymentEventFactory {
 
     public static final String REASON_PROVIDER_ERROR = "PAYMENT_PROVIDER_ERROR";
@@ -20,6 +22,7 @@ public final class PaymentEventFactory {
     private PaymentEventFactory() {
     }
 
+    // [VI] PAYMENT_LINK_CREATED: basePayload + checkoutUrl, qrCode, expiredAt (booking chỉ log).
     public static PaymentEvent linkCreated(Payment payment, Instant now) {
         Map<String, Object> payload = basePayload(payment);
         payload.put("checkoutUrl", payment.getCheckoutUrl());
@@ -28,6 +31,7 @@ public final class PaymentEventFactory {
         return event(payment.getBookingId(), PaymentEventType.PAYMENT_LINK_CREATED, now, payload);
     }
 
+    // [VI] PAYMENT_CREATE_FAILED: không tạo được link; reason = PAYMENT_PROVIDER_ERROR hoặc INVALID_PAYMENT_REQUEST.
     public static PaymentEvent createFailed(CreatePaymentCommand command, String reason, String message, Instant now) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("bookingId", command.getBookingId());
@@ -42,6 +46,8 @@ public final class PaymentEventFactory {
     }
 
     /** PAYMENT_SUCCEEDED / PAYMENT_FAILED / PAYMENT_EXPIRED / PAYMENT_CANCELLED, chosen from the payment status. */
+    // [VI] Trạng thái kết thúc -> event: SUCCESS=PAYMENT_SUCCEEDED, EXPIRED, CANCELLED, FAILED. Bốn event dùng
+    // CHUNG một payload (payment-succeeded.json), chỉ khác eventType và paymentStatus.
     public static PaymentEvent statusChanged(Payment payment, Instant now) {
         PaymentEventType type = switch (payment.getStatus()) {
             case SUCCESS -> PaymentEventType.PAYMENT_SUCCEEDED;
@@ -61,6 +67,7 @@ public final class PaymentEventFactory {
     /**
      * Event describing the current state of an existing payment, re-sent when booking repeats a command.
      */
+    // [VI] Dựng lại event theo trạng thái hiện tại (dùng khi cần gửi lại kết quả cho một lệnh bị giao trùng).
     public static PaymentEvent currentState(Payment payment, Instant now) {
         PaymentStatus status = payment.getStatus();
         return switch (status) {
@@ -69,6 +76,7 @@ public final class PaymentEventFactory {
         };
     }
 
+    // [VI] Field chung: paymentId, bookingId, userId, provider, paymentStatus, amount, currency.
     private static Map<String, Object> basePayload(Payment payment) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("paymentId", payment.getId());

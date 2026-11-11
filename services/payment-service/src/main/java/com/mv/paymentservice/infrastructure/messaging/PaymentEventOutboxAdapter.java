@@ -18,6 +18,8 @@ import java.util.Map;
  */
 @Component
 @RequiredArgsConstructor
+// [VI] Bọc PaymentEvent vào envelope { eventId, aggregateId, eventType, occurredAt, payload } rồi lưu outbox
+// (topic payment-events, key = bookingId để event cùng booking vào cùng partition). OutboxRelay gửi sau.
 public class PaymentEventOutboxAdapter implements PaymentEventOutboxPort {
 
     static final String AGGREGATE_TYPE = "BOOKING";

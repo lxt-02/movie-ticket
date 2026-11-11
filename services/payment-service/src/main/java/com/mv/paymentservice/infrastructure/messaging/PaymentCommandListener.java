@@ -31,6 +31,7 @@ import java.util.UUID;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+// [VI] Consumer topic payment-commands: nhận lệnh từ booking và gọi use case tương ứng.
 public class PaymentCommandListener {
 
     private final JsonCodec json;
@@ -43,6 +44,7 @@ public class PaymentCommandListener {
             topics = "${payment.kafka.payment-commands:payment-commands}",
             groupId = "${spring.kafka.consumer.group-id:payment-service}"
     )
+    // [VI] Parse JSON -> rẽ nhánh theo commandType. commandType lạ (sai hợp đồng) -> lỗi không retry, sang DLT ngay.
     public void onMessage(ConsumerRecord<String, String> record) {
         log.info("Kafka RECV topic={} partition={} offset={} key={} body={}",
                 record.topic(), record.partition(), record.offset(), record.key(), record.value());
@@ -74,6 +76,11 @@ public class PaymentCommandListener {
      * Tạo link thanh toán. Lỗi nghiệp vụ / PayOS → ghi PAYMENT_CREATE_FAILED cho booking biết; lỗi database của mình
      * → ném lại để Kafka thử lại (không báo nhầm cho booking rằng PayOS lỗi).
      */
+    // [VI] CREATE_PAYMENT -> tạo payment + link PayOS. Phân loại lỗi:
+    //  - DomainException (dữ liệu sai)    -> PAYMENT_CREATE_FAILED / INVALID_PAYMENT_REQUEST (booking bị huỷ)
+    //  - lỗi DB / transaction             -> ném lại cho Kafka retry
+    //  - lỗi khác (PayOS lỗi, timeout...) -> PAYMENT_CREATE_FAILED / PAYMENT_PROVIDER_ERROR (booking giữ PENDING)
+    // Gửi lặp cùng idempotencyKey thì trả lại đúng payment cũ, không tạo link thứ hai.
     private void onCreatePayment(PaymentCommandMessage message) {
         if (message.payload() == null) {
             throw new NonRetryableMessageException("CREATE_PAYMENT without payload (commandId "
@@ -95,6 +102,7 @@ public class PaymentCommandListener {
     }
 
     /** Huỷ các thanh toán còn mở của booking. Lỗi database ném lại để Kafka giao lại; lỗi PayOS do use case tự xử lý. */
+    // [VI] CANCEL_PAYMENT (booking huỷ / hết hạn) -> đóng mọi link còn mở của booking để khách không trả nhầm.
     private void onCancelPayment(PaymentCommandMessage message) {
         PaymentCommandMessage.Payload p = message.payload();
         UUID bookingId = p != null && p.bookingId() != null ? p.bookingId() : message.aggregateId();

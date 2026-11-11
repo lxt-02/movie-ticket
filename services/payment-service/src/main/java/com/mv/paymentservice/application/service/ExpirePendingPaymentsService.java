@@ -22,6 +22,9 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+// [VI] Job hết hạn phía payment (được PaymentExpirationScheduler gọi mỗi 60 giây).
+// Đây là nơi CHÍNH quyết định hết hạn, vì payment biết trạng thái tiền trên PayOS. Job bên booking chạy trễ
+// 90 giây và chỉ là lưới an toàn. Kết quả CLOSED -> phát PAYMENT_EXPIRED -> booking onPaymentExpired().
 public class ExpirePendingPaymentsService implements ExpirePendingPaymentsUseCase {
 
     static final String EXPIRE_REASON = "Payment deadline expired";
@@ -39,12 +42,14 @@ public class ExpirePendingPaymentsService implements ExpirePendingPaymentsUseCas
         int expired = 0;
         for (Payment payment : due) {
             try {
+                // [VI] Huỷ link trên PayOS rồi chuyển EXPIRED (xem PaymentSettlement.cancelAndClose cho 3 kết quả có thể).
                 GatewaySyncOutcome outcome = settlement.cancelAndClose(payment, PaymentStatus.EXPIRED, EXPIRE_REASON, now);
                 if (outcome == GatewaySyncOutcome.CLOSED) {
                     expired++;
                 } else if (outcome == GatewaySyncOutcome.PAID) {
                     log.warn("Overdue payment {} was in fact PAID on PayOS (webhook missed)", payment.getId());
                 }
+            // [VI] Không gọi được PayOS: bỏ qua payment này, lượt sau thử lại.
             } catch (PaymentGatewayException ex) {
                 log.warn("Could not expire payment {} (orderCode {}): {}",
                         payment.getId(), payment.getPayosOrderCode(), ex.getMessage());

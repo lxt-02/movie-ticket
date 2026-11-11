@@ -42,6 +42,10 @@ import java.util.concurrent.TimeUnit;
  */
 @Slf4j
 @Component
+// [VI] Relay outbox phía payment: gửi event trong outbox_messages lên topic payment-events (key = bookingId).
+// Khác booking: KHÔNG dùng khoá chung mà nhận từng lô (FOR UPDATE SKIP LOCKED trên từng dòng), nên nhiều
+// instance payment chạy song song nhận các lô khác nhau -> ưu tiên thông lượng hơn thứ tự. Event cùng booking
+// có ra khác thứ tự thì booking vẫn xử đúng vì mỗi nhánh kiểm tra trạng thái booking.
 public class OutboxRelay {
 
     private static final int MAX_ERROR_LENGTH = 2000;
@@ -69,6 +73,8 @@ public class OutboxRelay {
             fixedDelayString = "${payment.outbox.relay-delay-ms:10000}",
             initialDelayString = "${payment.outbox.relay-initial-delay-ms:1000}"
     )
+    // [VI] Một lượt (mỗi payment.outbox.relay-delay-ms = 10 s): nhận lô -> gửi từng message, chờ broker ack.
+    // Gặp lỗi broker tạm thời thì nhả phần còn lại của lô ngay (release) vì chúng sẽ gặp cùng lỗi.
     public void relay() {
         List<OutboxMessageInfraEntity> batch = transactionTemplate.execute(status -> claimBatch());
         if (batch == null || batch.isEmpty()) {
@@ -85,6 +91,8 @@ public class OutboxRelay {
     }
 
     /** Khoá và nhận một lô: PROCESSING, tăng số lần thử, hạn chót = now + stale-publishing-timeout. */
+    // [VI] Nhận lô: đánh dấu PROCESSING rồi commit. Instance chết giữa chừng thì dòng kẹt PROCESSING quá
+    // stale-publishing-timeout-ms (120 s) sẽ được nhận lại ở lượt sau.
     private List<OutboxMessageInfraEntity> claimBatch() {
         Instant now = clock.instant();
         List<OutboxMessageInfraEntity> claimed = repository.findClaimableForUpdate(now, properties.batchSize());
@@ -102,6 +110,9 @@ public class OutboxRelay {
      *
      * @return {@code null} khi đã xong (PUBLISHED hoặc FAILED); thời điểm thử lại khi gặp lỗi tạm thời
      */
+    // [VI] Gửi 1 message, mỗi kết quả ghi trong transaction riêng. Lỗi vĩnh viễn -> FAILED (requeue tay qua
+    // POST /api/v1/payments/admin/outbox/requeue-failed). Lỗi tạm -> về PENDING + next_retry_at, KHÔNG bao giờ
+    // đẩy sang FAILED, để PAYMENT_SUCCEEDED không bị mất khi broker sập lâu.
     private Instant publish(OutboxMessageInfraEntity message) {
         try {
             kafkaTemplate.send(message.getTopic(), message.getMessageKey(), message.getPayload())
@@ -128,6 +139,7 @@ public class OutboxRelay {
     }
 
     /** Thời gian chờ trước lần thử thứ {@code attempts}: retry-delay-ms, gấp đôi mỗi lần, không quá max-retry-delay-ms. */
+    // [VI] Back-off: retry-delay-ms (5 s) x 2^n, tối đa max-retry-delay-ms (300 s).
     Duration backOff(int attempts) {
         long delay = properties.retryDelayMs() << Math.min(Math.max(attempts - 1, 0), 20);
         return Duration.ofMillis(Math.min(delay, properties.maxRetryDelayMs()));

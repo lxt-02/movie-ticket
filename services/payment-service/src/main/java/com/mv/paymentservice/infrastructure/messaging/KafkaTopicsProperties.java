@@ -10,6 +10,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param partitions      partitions used when the topics are auto-created
  */
 @ConfigurationProperties(prefix = "payment.kafka")
+// [VI] Cấu hình payment.kafka.*. Tên topic mặc định phải khớp contracts/booking-payment/contract.json -> topics.
 public record KafkaTopicsProperties(String paymentCommands, String paymentEvents, Integer partitions) {
     public KafkaTopicsProperties {
         if (paymentCommands == null || paymentCommands.isBlank()) {

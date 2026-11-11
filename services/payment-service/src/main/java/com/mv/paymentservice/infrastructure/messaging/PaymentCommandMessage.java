@@ -16,6 +16,9 @@ import java.util.UUID;
  * </pre>
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
+// [VI] Khuôn JSON payment ĐỌC từ topic payment-commands (booking gửi), khớp create-payment.json / cancel-payment.json.
+// Envelope: commandId, aggregateId (= bookingId = key Kafka), commandType, occurredAt, payload.
+// Payload gộp field của cả 2 lệnh: CREATE dùng bookingId..idempotencyKey, CANCEL chỉ dùng bookingId + reason.
 public record PaymentCommandMessage(
         UUID commandId,
         UUID aggregateId,

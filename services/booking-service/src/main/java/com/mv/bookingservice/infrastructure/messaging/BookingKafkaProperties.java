@@ -19,6 +19,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param verifyTopics              check on startup that the topics booking needs exist (wrong name, missing topic)
  */
 @ConfigurationProperties(prefix = "booking.kafka")
+// [VI] Cấu hình booking.kafka.* trong application.yaml. Tên topic mặc định (payment-commands, payment-events)
+// phải khớp contracts/booking-payment/contract.json -> topics. Event lỗi hẳn đi sang payment-events.DLT.
 public record BookingKafkaProperties(
         String paymentCommands,
         String paymentEvents,

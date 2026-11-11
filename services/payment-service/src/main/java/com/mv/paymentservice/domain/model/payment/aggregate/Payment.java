@@ -27,6 +27,9 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
+// [VI] Aggregate Payment = một link thanh toán PayOS của một booking (một booking có thể có nhiều payment
+// khi khách "thanh toán lại"). Quy tắc: chỉ VND, số tiền nguyên dương; SUCCESS không bao giờ bị ghi đè;
+// tiền tới sau khi đã kết thúc = LATE_PAID (giữ trạng thái, chỉ log).
 public class Payment {
 
     public static final String PROVIDER_PAYOS = "PAYOS";
@@ -56,6 +59,8 @@ public class Payment {
     private Instant createdAt;
     private Instant updatedAt;
 
+    // [VI] Tạo payment PENDING khi nhận CREATE_PAYMENT. Lỗi validate ở đây (InvalidPaymentException) sẽ thành
+    // PAYMENT_CREATE_FAILED với reason INVALID_PAYMENT_REQUEST -> booking bị huỷ.
     public static Payment createPending(UUID bookingId, UUID userId, BigDecimal amount, String currency,
                                         String idempotencyKey, Instant expiredAt, Instant now) {
         if (bookingId == null) {
@@ -126,6 +131,7 @@ public class Payment {
      * @param paidAt time of the bank transaction reported by PayOS (falls back to now when unknown)
      * @param now    processing time
      */
+    // [VI] Ghi nhận tiền về. Đã SUCCESS -> ALREADY_SUCCESS; đã kết thúc khác -> LATE_PAID; còn lại -> SUCCESS.
     public PaidTransition markPaid(String paymentLinkId, Instant paidAt, Instant now) {
         Instant effectivePaidAt = paidAt != null ? paidAt : now;
         if (status == PaymentStatus.SUCCESS) {
@@ -136,6 +142,7 @@ public class Payment {
                 this.gatewayTransactionId = paymentLinkId;
             }
             this.paidAt = effectivePaidAt;
+            // [VI] LATE_PAID: khách huỷ/hết hạn rồi mà ngân hàng vẫn chuyển tiền -> giữ trạng thái cũ, lưu paidAt để hoàn tay.
             this.failureReason = "Late PayOS success webhook after terminal payment status: " + status;
             this.updatedAt = now;
             return PaidTransition.LATE_PAID;
@@ -173,6 +180,7 @@ public class Payment {
         return moveToTerminal(target, reason, now);
     }
 
+    // [VI] Chốt chặn: payment đã kết thúc (nhất là SUCCESS) thì từ chối đổi -> event trùng/đến muộn không phá trạng thái.
     private boolean moveToTerminal(PaymentStatus target, String reason, Instant now) {
         if (status.isTerminal()) {
             // SUCCESS is never overwritten; other terminal states stay as they are.

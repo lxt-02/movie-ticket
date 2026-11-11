@@ -48,6 +48,9 @@ import java.util.concurrent.TimeUnit;
  */
 @Slf4j
 @Component
+// [VI] So với OutboxRelay bên payment: booking dùng MỘT khoá chung (chỉ 1 instance gửi) để giữ thứ tự nghiêm
+// theo booking (CANCEL_PAYMENT không được vượt CREATE_PAYMENT). Payment thì nhận theo lô (SKIP LOCKED từng dòng)
+// để ưu tiên thông lượng. Chu kỳ: booking 2 s, payment 10 s.
 public class BookingOutboxRelay {
 
     static final String LOCK_NAME = "booking-outbox";

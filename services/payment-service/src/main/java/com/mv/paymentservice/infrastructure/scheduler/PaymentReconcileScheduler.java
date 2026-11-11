@@ -12,6 +12,8 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+// [VI] Mỗi 60 s quét payment PENDING và hỏi PayOS (PaymentSettlement.reconcile()). Lưới an toàn khi webhook bị mất:
+// khách đã trả mà webhook không tới thì vẫn được ghi SUCCESS và booking vẫn nhận PAYMENT_SUCCEEDED.
 public class PaymentReconcileScheduler {
 
     private final ReconcilePaymentsUseCase reconcilePaymentsUseCase;

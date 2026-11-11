@@ -18,6 +18,9 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+// [VI] Dạng nội bộ của một event từ payment-service, do PaymentEventListener.toCommand() dựng từ JSON.
+// Các hằng số dưới đây PHẢI khớp contracts/booking-payment/contract.json (eventTypes, createFailedReasons);
+// BookingPaymentContractTest sẽ fail nếu lệch.
 public class PaymentEventCommand {
     public static final String PAYMENT_LINK_CREATED = "PAYMENT_LINK_CREATED";
     public static final String PAYMENT_CREATE_FAILED = "PAYMENT_CREATE_FAILED";
@@ -27,9 +30,12 @@ public class PaymentEventCommand {
     public static final String PAYMENT_CANCELLED = "PAYMENT_CANCELLED";
 
     /** PAYMENT_CREATE_FAILED reason codes sent by payment-service. */
+    // [VI] Mã lý do của PAYMENT_CREATE_FAILED: INVALID = huỷ booking, PROVIDER_ERROR = giữ PENDING.
     public static final String REASON_INVALID_REQUEST = "INVALID_PAYMENT_REQUEST";
     public static final String REASON_PROVIDER_ERROR = "PAYMENT_PROVIDER_ERROR";
 
+    // [VI] Những trường booking thực sự dùng: eventId + bookingId (thiếu thì bỏ qua message),
+    // amount + currency (so với booking), paidAt (xét đúng hạn), paymentId (ghi vào paidPaymentId).
     private UUID eventId;
     private String eventType;
     private UUID bookingId;

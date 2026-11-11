@@ -27,6 +27,9 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/payments")
 @RequiredArgsConstructor
+// [VI] API cho frontend. Booking KHÔNG trả checkoutUrl trong response đặt vé (201): link được tạo bất đồng bộ
+// qua Kafka. Client lấy bookingId từ response 201 rồi polling endpoint by-booking ở đây để lấy checkoutUrl/qrCode.
+// Lý do tách: tạo link phụ thuộc PayOS (chậm/lỗi) -> đặt vé vẫn trả 201 ngay cả khi PayOS hoặc Kafka đang sập.
 public class PaymentController {
 
     private final GetPaymentUseCase getPaymentUseCase;
@@ -44,6 +47,8 @@ public class PaymentController {
     }
 
     /** Latest payment (PayOS link) of a booking. 404 until booking-service's CREATE_PAYMENT is processed. */
+    // [VI] Polling sau khi đặt vé: trả 404 cho tới khi CREATE_PAYMENT được xử lý (relay booking 2 s + consumer +
+    // gọi PayOS), sau đó trả payment có checkoutUrl, qrCode.
     @GetMapping("/by-booking/{bookingId}")
     public ResponseEntity<ApiResponse<PaymentResponse>> getLatestPaymentByBooking(
             @PathVariable UUID bookingId,
@@ -66,6 +71,7 @@ public class PaymentController {
     }
 
     /** Same as /{id}/sync for the booking's latest payment. */
+    // [VI] Khách quay lại từ trang PayOS: ép hỏi PayOS ngay, không chờ webhook hay job reconcile 60 s.
     @PostMapping("/by-booking/{bookingId}/sync")
     public ResponseEntity<ApiResponse<PaymentResponse>> syncLatestPaymentByBooking(
             @PathVariable UUID bookingId,
@@ -77,6 +83,7 @@ public class PaymentController {
     }
 
     /** Until JWT is in place the caller identity is the required X-User-Id header set by the gateway. */
+    // [VI] So X-User-Id (gateway đặt từ JWT) với chủ payment: không phải chủ thì trả 404 -> không xem được link người khác.
     private void requireOwner(Payment payment, UUID userId) {
         if (userId == null || !userId.equals(payment.getUserId())) {
             throw new PaymentNotFoundException(payment.getId());

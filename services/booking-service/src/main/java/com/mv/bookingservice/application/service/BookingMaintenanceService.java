@@ -30,6 +30,11 @@ import java.util.Optional;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+// [VI] Các job nền của booking-service:
+//  - expireOverdueBookings(): LƯỚI AN TOÀN cho hết hạn. Bình thường payment-service quyết định hết hạn
+//    (nó biết trạng thái tiền trên PayOS) và gửi PAYMENT_EXPIRED. Job này chạy trễ hơn 90 giây (grace)
+//    và chỉ bắt các booking mà PAYMENT_EXPIRED chưa tới (payment sập, event kẹt DLT...).
+//  - retrySeatConfirmations(): thử chốt ghế lại cho booking CONFIRMING (lúc tiền tới thì Showtime đang lỗi).
 public class BookingMaintenanceService implements BookingMaintenanceUseCase {
 
     static final String EXPIRED_REASON = "Booking expired";
@@ -44,6 +49,11 @@ public class BookingMaintenanceService implements BookingMaintenanceUseCase {
 
     @Override
     @Transactional
+    // [VI] Lấy booking PENDING đã quá expiresAt + grace (khoá FOR UPDATE). Với từng booking:
+    //  1. Hỏi payment-service qua HTTP (GET /internal/payments/by-booking/{id}/paid-status, hợp đồng paid-status.json)
+    //     xem thực ra đã trả tiền chưa -> tránh làm mất vé của khách khi PAYMENT_SUCCEEDED bị lạc.
+    //  2. Đã trả hợp lệ -> recoverPaidBooking() xác nhận thay vì expire.
+    //  3. Chưa trả -> expire, gửi CANCEL_PAYMENT qua outbox để đóng link PayOS còn mở, rồi nhả ghế.
     public int expireOverdueBookings() {
         Instant now = Instant.now();
         Instant cutoff = now.minus(policy.expiryGrace());
@@ -54,6 +64,8 @@ public class BookingMaintenanceService implements BookingMaintenanceUseCase {
             try {
                 paid = paymentStatusPort.findSucceededPayment(booking.getId());
             } catch (RuntimeException e) {
+                // [VI] payment-service không trả lời: nếu hold ghế còn thì hoãn sang lượt sau (không đoán);
+                // nếu hold đã hết thì expire luôn, vì ghế không còn để xác nhận.
                 if (holdStillAlive(booking, now)) {
                     // Do not guess: the seats are still held, so wait for the next run.
                     log.warn("Cannot ask payment-service about booking {} ({}); expiry postponed to the next run",
@@ -71,6 +83,7 @@ public class BookingMaintenanceService implements BookingMaintenanceUseCase {
             booking.expire();
             Booking saved = saveBookingPort.save(booking);
             // Close any PayOS link still open so the buyer cannot pay for released seats.
+            // [VI] Ghi CANCEL_PAYMENT vào outbox cùng transaction; BookingOutboxRelay sẽ gửi lên topic payment-commands.
             paymentCommandPort.cancelPayments(saved, EXPIRED_REASON);
             releaseHoldQuietly(saved);
             expired++;
@@ -80,10 +93,13 @@ public class BookingMaintenanceService implements BookingMaintenanceUseCase {
     }
 
     /** The Showtime seat hold ends {@code holdSafetyMargin} after the payment deadline. */
+    // [VI] Hold ghế ở Showtime hết sau expiresAt + holdSafetyMargin (mặc định 180 s).
     private boolean holdStillAlive(Booking booking, Instant now) {
         return booking.getExpiresAt() != null && now.isBefore(booking.getExpiresAt().plus(policy.holdSafetyMargin()));
     }
 
+    // [VI] Booking đã được trả nhưng event SUCCEEDED chưa áp dụng: kiểm tra đúng tiền + đúng hạn rồi xác nhận ghế.
+    // Sai tiền hoặc trả trễ -> trả false để booking bị expire và log MANUAL CHECK.
     private boolean recoverPaidBooking(Booking booking, PaidPayment payment) {
         boolean sameAmount = payment.amount() != null && booking.getTotalAmount() != null
                 && payment.amount().compareTo(booking.getTotalAmount()) == 0
@@ -106,6 +122,8 @@ public class BookingMaintenanceService implements BookingMaintenanceUseCase {
 
     @Override
     @Transactional
+    // [VI] Booking CONFIRMING = đã có tiền nhưng chưa chốt được ghế ở Showtime. Thử lại tới khi CONFIRMED
+    // hoặc CANCELLED (ghế đã mất).
     public int retrySeatConfirmations() {
         int confirmed = 0;
         for (Booking booking : loadBookingPort.findConfirmingForUpdate(policy.batchSize())) {
