@@ -6,11 +6,13 @@ import { Link } from 'react-router-dom';
 export default function CinemasPage() {
   const [cinemas, setCinemas] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
     getCinemas()
       .then((data) => setCinemas(data || []))
+      .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
 
@@ -57,7 +59,7 @@ export default function CinemasPage() {
     },
   ];
 
-  const displayList = cinemas.length > 0 ? cinemas : sampleCinemas;
+  const displayList = cinemas;
 
   return (
     <div className="max-w-7xl mx-auto px-4 lg:px-8 py-10 animate-in fade-in duration-300 space-y-10">
@@ -73,6 +75,13 @@ export default function CinemasPage() {
           Không gian sảnh chờ sang trọng, hệ thống phòng chiếu trang bị máy chiếu Laser kép và âm thanh đa chiều chuẩn Hollywood.
         </p>
       </div>
+
+      {error && (
+        <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-sm">{error}</div>
+      )}
+      {!loading && !error && displayList.length === 0 && (
+        <div className="p-10 text-center bg-white border border-slate-200 rounded-3xl text-sm text-slate-500">Chưa có rạp nào.</div>
+      )}
 
       {/* Cinemas Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -90,11 +99,13 @@ export default function CinemasPage() {
                   className="w-full h-full object-cover"
                 />
                 <span className="absolute top-4 left-4 px-3 py-1 rounded-xl bg-slate-900/80 backdrop-blur-md text-white font-bold text-xs">
-                  {c.city || sample.city}
+                  {[c.district, c.city].filter(Boolean).join(', ')}
                 </span>
-                <span className="absolute top-4 right-4 px-3 py-1 rounded-xl bg-red-600 text-white font-bold text-xs shadow">
-                  {c.screensCount || sample.screensCount} Phòng Chiếu
-                </span>
+                {c.brand && (
+                  <span className="absolute top-4 right-4 px-3 py-1 rounded-xl bg-red-600 text-white font-bold text-xs shadow">
+                    {c.brand}
+                  </span>
+                )}
               </div>
 
               <div className="p-6 space-y-4">
@@ -104,11 +115,11 @@ export default function CinemasPage() {
                   </h3>
                   <p className="text-xs text-slate-500 flex items-start gap-1.5 mt-1.5">
                     <MapPin className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                    <span>{c.address || sample.address}</span>
+                    <span>{c.address}</span>
                   </p>
                   <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-1">
                     <Phone className="w-4 h-4 text-red-600 shrink-0" />
-                    <span>Hotline: {c.phone || sample.phone}</span>
+                    <span>Hotline: {c.phone || '—'}</span>
                   </p>
                 </div>
 

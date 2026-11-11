@@ -12,7 +12,7 @@ import {
   ArrowRight,
   Sparkles
 } from 'lucide-react';
-import { getUserBookings, cancelBooking, isAuthenticated } from '../api';
+import { getUserBookings, cancelBooking, isAuthenticated, fmtDateTime } from '../api';
 
 export default function MyTicketsPage() {
   const [bookings, setBookings] = useState([]);
@@ -24,8 +24,12 @@ export default function MyTicketsPage() {
   const loadBookings = () => {
     setLoading(true);
     getUserBookings()
-      .then((data) => setBookings(Array.isArray(data) ? data : data?.content || []))
-      .catch(() => setBookings([]))
+      .then((data) => setBookings([...(data || [])].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))))
+      .catch((e) => {
+        setBookings([]);
+        setActionMsg('');
+        alert(e.message);
+      })
       .finally(() => setLoading(false));
   };
 
@@ -54,34 +58,7 @@ export default function MyTicketsPage() {
     }
   };
 
-  const sampleBookings = [
-    {
-      id: '90000000-0000-0000-0000-000000000001',
-      bookingCode: 'BK888999',
-      movieTitle: 'BÒ SỮA BAY',
-      cinemaName: 'MTK Landmark 81',
-      screenName: 'Phòng 1 (IMAX Laser)',
-      startTime: '2026-11-10T19:30:00Z',
-      seats: [{ seatLabel: 'C4' }, { seatLabel: 'C5' }],
-      totalAmount: 230000,
-      status: 'CONFIRMED',
-      createdAt: '2026-11-10T10:00:00Z',
-    },
-    {
-      id: '90000000-0000-0000-0000-000000000002',
-      bookingCode: 'BK555666',
-      movieTitle: 'THIÊN ĐƯỜNG TĂM TỐI',
-      cinemaName: 'MTK Vincom Đồng Khởi',
-      screenName: 'Phòng 2 (4DX)',
-      startTime: '2026-11-09T21:00:00Z',
-      seats: [{ seatLabel: 'D3' }],
-      totalAmount: 125000,
-      status: 'CANCELLED',
-      createdAt: '2026-11-09T14:30:00Z',
-    },
-  ];
-
-  const displayList = bookings.length > 0 ? bookings : sampleBookings;
+  const displayList = bookings;
 
   return (
     <div className="max-w-7xl mx-auto px-4 lg:px-8 py-10 animate-in fade-in duration-300 space-y-8">
@@ -172,13 +149,11 @@ export default function MyTicketsPage() {
                     </span>
                     <span className="flex items-center gap-1 font-mono">
                       <Clock className="w-3.5 h-3.5 text-red-600" />
-                      {b.startTime ? new Date(b.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '19:30'}
+                      {fmtDateTime(b.startTime)}
                     </span>
                     <span className="font-bold text-red-600">
                       Ghế:{' '}
-                      {Array.isArray(b.seats)
-                        ? b.seats.map((s) => s.seatLabel).join(', ')
-                        : 'A1, A2'}
+                      {(b.seats || []).map((s) => s.seatLabel).join(', ')}
                     </span>
                   </div>
                 </div>
@@ -188,7 +163,7 @@ export default function MyTicketsPage() {
                   <div className="text-right pr-4 hidden sm:block">
                     <span className="text-xs text-slate-400 block">Tổng tiền</span>
                     <span className="text-base font-black text-slate-900 font-mono">
-                      {Number(b.totalAmount || 190000).toLocaleString()} VND
+                      {Number(b.totalAmount || 0).toLocaleString('vi-VN')} VND
                     </span>
                   </div>
 
@@ -197,10 +172,10 @@ export default function MyTicketsPage() {
                     className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 transition-all"
                   >
                     <Ticket className="w-4 h-4 text-red-400" />
-                    <span>Xem Cuống Vé</span>
+                    <span>{b.status === 'PENDING' ? 'Thanh Toán' : 'Xem Cuống Vé'}</span>
                   </Link>
 
-                  {isConfirmed && (
+                  {b.status === 'PENDING' && (
                     <button
                       onClick={() => handleCancelBooking(b.id)}
                       disabled={actionLoading}

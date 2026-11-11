@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { logout, getUserRole, isAuthenticated } from '../api';
 
-export default function Navbar({ onSearch, currentUserProfile }) {
+export default function Navbar({ currentUserProfile }) {
   const [keyword, setKeyword] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
@@ -28,8 +28,8 @@ export default function Navbar({ onSearch, currentUserProfile }) {
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
-    if (onSearch) onSearch(keyword);
-    navigate('/movies');
+    const q = keyword.trim();
+    navigate(q ? `/search?q=${encodeURIComponent(q)}` : '/search');
   };
 
   const handleLogout = () => {
@@ -106,6 +106,9 @@ export default function Navbar({ onSearch, currentUserProfile }) {
         <nav className="hidden lg:flex items-center gap-6 text-sm font-bold tracking-tight text-slate-700">
           <Link to="/movies" className="hover:text-red-600 transition-colors uppercase tracking-wider">
             Phim Đang Chiếu
+          </Link>
+          <Link to="/search" className="hover:text-red-600 transition-colors uppercase tracking-wider">
+            Tìm Kiếm
           </Link>
           <Link to="/cinemas" className="hover:text-red-600 transition-colors uppercase tracking-wider">
             Cụm Rạp MTK

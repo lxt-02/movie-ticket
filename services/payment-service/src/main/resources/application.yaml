@@ -58,6 +58,8 @@ payos:
   return-url: ${PAYOS_RETURN_URL:http://localhost:3000/payment/success}
   cancel-url: ${PAYOS_CANCEL_URL:http://localhost:3000/payment/cancel}
   payment-expiration-minutes: ${PAYOS_PAYMENT_EXPIRATION_MINUTES:15}
+  # Demo: chuyển khoản thật = giá vé / divisor (10 -> vé 95.000đ chỉ chuyển 9.500đ). Đặt 1 để thu đúng giá.
+  amount-divisor: ${PAYOS_AMOUNT_DIVISOR:10}
   connect-timeout-ms: 5000
   read-timeout-ms: 15000
 

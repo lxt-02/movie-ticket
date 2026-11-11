@@ -16,7 +16,12 @@ public record PayosProperties(
         String cancelUrl,
         Long paymentExpirationMinutes,
         Integer connectTimeoutMs,
-        Integer readTimeoutMs
+        Integer readTimeoutMs,
+        /**
+         * Demo/test: số tiền gửi sang PayOS = số tiền thật / amountDivisor (mặc định 1 = trả đúng giá).
+         * Chỉ áp dụng ở biên PayOS (adapter); payment, booking và event vẫn giữ số tiền thật.
+         */
+        Long amountDivisor
 ) {
     public PayosProperties {
         if (baseUrl == null || baseUrl.isBlank()) {
@@ -30,6 +35,9 @@ public record PayosProperties(
         }
         if (readTimeoutMs == null || readTimeoutMs <= 0) {
             readTimeoutMs = 15000;
+        }
+        if (amountDivisor == null || amountDivisor <= 0) {
+            amountDivisor = 1L;
         }
     }
 }

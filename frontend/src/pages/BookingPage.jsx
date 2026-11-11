@@ -10,18 +10,18 @@ import {
   Sparkles,
   Info
 } from 'lucide-react';
-import { getShowtimeSeats, createBooking, isAuthenticated } from '../api';
+import { getShowtimeSeats, getShowtimeById, createBooking, isAuthenticated } from '../api';
 
 export default function BookingPage() {
   const { showtimeId } = useParams();
   const navigate = useNavigate();
 
   const [seats, setSeats] = useState([]);
+  const [showtime, setShowtime] = useState(null);
   const [selectedSeats, setSelectedSeats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [bookingLoading, setBookingLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  const [countdown, setCountdown] = useState(600); // 10 minutes
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -31,16 +31,14 @@ export default function BookingPage() {
     }
 
     setLoading(true);
-    getShowtimeSeats(showtimeId)
-      .then((data) => setSeats(data || []))
+    Promise.all([getShowtimeById(showtimeId), getShowtimeSeats(showtimeId)])
+      .then(([st, data]) => {
+        setShowtime(st);
+        setSeats(data || []);
+      })
       .catch((err) => setErrorMsg(err.message || 'Không thể tải sơ đồ ghế'))
       .finally(() => setLoading(false));
 
-    // 10-min countdown timer
-    const timer = setInterval(() => {
-      setCountdown((prev) => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-    return () => clearInterval(timer);
   }, [showtimeId, navigate]);
 
   const toggleSeat = (seat) => {
@@ -56,13 +54,8 @@ export default function BookingPage() {
     }
   };
 
-  const formatTimer = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const totalPrice = selectedSeats.reduce((sum, s) => sum + (s.price || 95000), 0);
+  const totalPrice = selectedSeats.reduce((sum, s) => sum + Number(s.price || 0), 0);
+  const rowLetters = [...new Set(seats.map((s) => s.rowCode).filter(Boolean))].sort();
 
   const handleProceedToPayment = async () => {
     if (selectedSeats.length === 0) return;
@@ -70,7 +63,7 @@ export default function BookingPage() {
     setErrorMsg('');
 
     try {
-      const booking = await createBooking(showtimeId, selectedSeats);
+      const booking = await createBooking(showtimeId, selectedSeats, showtime);
       navigate(`/payment/${booking.id || booking.bookingId}`);
     } catch (err) {
       setErrorMsg(err.message || 'Đặt vé thất bại! Ghế đã được đặt hoặc bị giữ chỗ.');
@@ -99,11 +92,15 @@ export default function BookingPage() {
           <span>Quay lại chọn suất chiếu</span>
         </button>
 
-        <div className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold">
-          <Clock className="w-4 h-4 text-amber-600" />
-          <span>Thời gian giữ ghế còn lại: </span>
-          <span className="font-mono text-sm text-red-600">{formatTimer(countdown)}</span>
-        </div>
+        {showtime && (
+          <div className="text-center sm:text-right">
+            <div className="text-sm font-black text-slate-900 uppercase">{showtime.movieTitle}</div>
+            <div className="text-xs text-slate-500 flex items-center gap-1 justify-center sm:justify-end">
+              <Clock className="w-3.5 h-3.5 text-red-600" />
+              {showtime.startTime} • {showtime.date} • {showtime.cinemaName} • {showtime.screenName}
+            </div>
+          </div>
+        )}
       </div>
 
       {errorMsg && (
@@ -126,10 +123,10 @@ export default function BookingPage() {
         {/* Seats Grid */}
         <div className="overflow-x-auto pb-6">
           <div className="inline-block min-w-[500px] space-y-3">
-            {['A', 'B', 'C', 'D', 'E'].map((rowLetter) => {
+            {rowLetters.map((rowLetter) => {
               const rowSeats = seats.filter(
-                (s) => s.rowCode === rowLetter || s.seatCode?.startsWith(rowLetter)
-              );
+                (s) => s.rowCode === rowLetter
+              ).sort((a, b) => (a.seatNumber || 0) - (b.seatNumber || 0));
               return (
                 <div key={rowLetter} className="flex items-center justify-center gap-2.5">
                   <span className="w-6 font-bold text-slate-400 text-xs font-mono">{rowLetter}</span>

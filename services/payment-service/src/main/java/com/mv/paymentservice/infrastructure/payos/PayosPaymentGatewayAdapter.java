@@ -58,6 +58,7 @@ public class PayosPaymentGatewayAdapter implements PaymentGatewayPort {
     @Override
     public PaymentLink createPaymentLink(PaymentLinkRequest request) {
         requireCredentials();
+        long payosAmount = toPayosAmount(request.amount());
         String returnUrl = properties.returnUrl();
         String cancelUrl = properties.cancelUrl();
         if (isBlank(returnUrl) || isBlank(cancelUrl)) {
@@ -65,12 +66,12 @@ public class PayosPaymentGatewayAdapter implements PaymentGatewayPort {
         }
 
         String signature = PayosSignature.hmacSha256Hex(properties.checksumKey(),
-                PayosSignature.paymentRequestData(request.amount(), cancelUrl, request.description(),
+                PayosSignature.paymentRequestData(payosAmount, cancelUrl, request.description(),
                         request.orderCode(), returnUrl));
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("orderCode", request.orderCode());
-        body.put("amount", request.amount());
+        body.put("amount", payosAmount);
         body.put("description", request.description());
         body.put("cancelUrl", cancelUrl);
         body.put("returnUrl", returnUrl);
@@ -119,7 +120,7 @@ public class PayosPaymentGatewayAdapter implements PaymentGatewayPort {
                 Long amount = longValue(tx, "amount");
                 transactions.add(new PaymentLinkTransaction(
                         text(tx, "reference"),
-                        amount == null ? 0L : amount,
+                        fromPayosAmount(amount),
                         PayosTime.parse(text(tx, "transactionDateTime"))));
             }
         }
@@ -127,8 +128,8 @@ public class PayosPaymentGatewayAdapter implements PaymentGatewayPort {
         Long amountPaid = longValue(data, "amountPaid");
         return new PaymentLinkInfo(
                 text(data, "status"),
-                amount == null ? 0L : amount,
-                amountPaid == null ? 0L : amountPaid,
+                fromPayosAmount(amount),
+                fromPayosAmount(amountPaid),
                 text(data, "cancellationReason"),
                 transactions,
                 data.toString());
@@ -162,7 +163,7 @@ public class PayosPaymentGatewayAdapter implements PaymentGatewayPort {
 
         PayosWebhookData webhookData = new PayosWebhookData(
                 longValue(data, "orderCode"),
-                longValue(data, "amount"),
+                nullableFromPayosAmount(longValue(data, "amount")),
                 text(data, "currency"),
                 text(data, "paymentLinkId"),
                 text(data, "reference"),
@@ -206,6 +207,33 @@ public class PayosPaymentGatewayAdapter implements PaymentGatewayPort {
         }
         JsonNode data = root.get("data");
         return data == null ? json.mapper().createObjectNode() : data;
+    }
+
+    /**
+     * Số tiền thật -> số tiền gửi PayOS (chia cho payos.amount-divisor). Bắt buộc chia hết, để khi đọc ngược
+     * (nhân lại) khớp đúng số tiền đã lưu và các phép so khớp amount ở webhook / sync vẫn đúng.
+     */
+    private long toPayosAmount(long realAmount) {
+        long divisor = properties.amountDivisor();
+        if (divisor == 1) {
+            return realAmount;
+        }
+        if (realAmount % divisor != 0) {
+            throw new PaymentGatewayException("Amount " + realAmount + " is not divisible by payos.amount-divisor "
+                    + divisor);
+        }
+        long scaled = realAmount / divisor;
+        log.warn("PayOS amount divisor {} active: charging {} instead of {} (demo only)", divisor, scaled, realAmount);
+        return scaled;
+    }
+
+    /** Số tiền PayOS trả về -> số tiền thật (nhân lại với payos.amount-divisor). */
+    private long fromPayosAmount(Long payosAmount) {
+        return payosAmount == null ? 0L : Math.multiplyExact(payosAmount, properties.amountDivisor());
+    }
+
+    private Long nullableFromPayosAmount(Long payosAmount) {
+        return payosAmount == null ? null : fromPayosAmount(payosAmount);
     }
 
     private void requireCredentials() {

@@ -12,26 +12,43 @@ import {
   Tv,
   CheckCircle2
 } from 'lucide-react';
-import { getMovieDetails, getShowtimes, getCinemas, isAuthenticated } from '../api';
+import { getMovieDetails, getShowtimes, isAuthenticated } from '../api';
+
+const STATUS_LABELS = { NOW_SHOWING: 'ĐANG CHIẾU TẠI RẠP', COMING_SOON: 'SẮP CHIẾU', ENDED: 'ĐÃ KẾT THÚC' };
 
 export default function MovieDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [movie, setMovie] = useState(null);
   const [showtimes, setShowtimes] = useState([]);
-  const [cinemas, setCinemas] = useState([]);
   const [selectedCinemaId, setSelectedCinemaId] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [showtimeError, setShowtimeError] = useState('');
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
     setLoading(true);
-    Promise.all([getMovieDetails(id), getShowtimes(id), getCinemas()])
-      .then(([m, sts, cns]) => {
+    setError('');
+    setShowtimeError('');
+    Promise.all([
+      getMovieDetails(id),
+      getShowtimes(id).catch((e) => {
+        setShowtimeError(e.message);
+        return [];
+      }),
+    ])
+      .then(([m, sts]) => {
         setMovie(m);
-        setShowtimes(sts || []);
-        setCinemas(cns || []);
-        if (cns && cns.length > 0) setSelectedCinemaId(cns[0].id);
+        const sorted = [...sts].sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
+        setShowtimes(sorted);
+        setSelectedDate(sorted[0]?.dateKey || null);
+        setSelectedCinemaId(null);
+      })
+      .catch((e) => {
+        setMovie(null);
+        setError(e.message);
       })
       .finally(() => setLoading(false));
   }, [id]);
@@ -56,6 +73,7 @@ export default function MovieDetailPage() {
     return (
       <div className="max-w-4xl mx-auto py-20 text-center">
         <h2 className="text-xl font-bold text-slate-800">Không tìm thấy thông tin phim</h2>
+        {error && <p className="text-sm text-slate-500 mt-2">{error}</p>}
         <Link to="/" className="text-red-600 font-bold mt-4 inline-block hover:underline">
           &larr; Về trang chủ
         </Link>
@@ -63,9 +81,11 @@ export default function MovieDetailPage() {
     );
   }
 
-  const filteredShowtimes = showtimes.filter(
-    (st) => !selectedCinemaId || st.cinemaId === selectedCinemaId || !st.cinemaId
-  );
+  // Ngày và cụm rạp lấy từ chính các suất chiếu thật của phim (showtime-service)
+  const dates = [...new Map(showtimes.map((st) => [st.dateKey, st.date])).entries()];
+  const showtimesOfDay = showtimes.filter((st) => !selectedDate || st.dateKey === selectedDate);
+  const cinemas = [...new Map(showtimesOfDay.map((st) => [st.cinemaId, { id: st.cinemaId, name: st.cinemaName }])).values()];
+  const filteredShowtimes = showtimesOfDay.filter((st) => !selectedCinemaId || st.cinemaId === selectedCinemaId);
 
   return (
     <div className="max-w-7xl mx-auto px-4 lg:px-8 py-8 animate-in fade-in duration-300 space-y-10">
@@ -97,10 +117,7 @@ export default function MovieDetailPage() {
           <div>
             <div className="flex flex-wrap items-center gap-2 mb-2">
               <span className="px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-red-50 text-red-700 border border-red-200">
-                ĐANG CHIẾU TẠI RẠP
-              </span>
-              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1">
-                <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" /> 4.9/5
+                {STATUS_LABELS[movie.status] || movie.status}
               </span>
               {movie.format && (
                 <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
@@ -133,7 +150,7 @@ export default function MovieDetailPage() {
               <div>
                 <span className="text-slate-500 block mb-0.5">Thể loại:</span>
                 <span className="font-bold text-slate-800 text-sm">
-                  {Array.isArray(movie.genres) ? movie.genres.join(', ') : 'Hành Động, Hài'}
+                  {movie.genres.join(', ') || 'Đang cập nhật'}
                 </span>
               </div>
             </div>
@@ -162,15 +179,52 @@ export default function MovieDetailPage() {
         <div>
           <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
             <Ticket className="w-5 h-5 text-red-600" />
-            Lịch Chiếu & Suất Chiếu Hôm Nay
+            Lịch Chiếu & Suất Chiếu
           </h2>
           <p className="text-xs text-slate-500 mt-1">
             Chọn cụm rạp và giờ chiếu phù hợp để tiến hành chọn vị trí ghế ngồi
           </p>
         </div>
 
+        {showtimeError && (
+          <div className="p-3 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-xs">{showtimeError}</div>
+        )}
+
+        {/* Date Pills */}
+        {dates.length > 0 && (
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            {dates.map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => {
+                  setSelectedDate(key);
+                  setSelectedCinemaId(null);
+                }}
+                className={`px-4 py-2 rounded-2xl text-xs font-black whitespace-nowrap border transition-all ${
+                  selectedDate === key
+                    ? 'bg-slate-900 border-slate-900 text-white'
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <Calendar className="w-3.5 h-3.5 inline mr-1" />
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Cinema Pills */}
         <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+          {cinemas.length > 1 && (
+            <button
+              onClick={() => setSelectedCinemaId(null)}
+              className={`px-4 py-2.5 rounded-2xl text-xs font-bold whitespace-nowrap transition-all border ${
+                !selectedCinemaId ? 'bg-red-600 border-red-600 text-white' : 'bg-slate-50 border-slate-200 text-slate-700'
+              }`}
+            >
+              Tất cả rạp
+            </button>
+          )}
           {cinemas.map((c) => (
             <button
               key={c.id}
@@ -194,7 +248,7 @@ export default function MovieDetailPage() {
           </h3>
           {filteredShowtimes.length === 0 ? (
             <div className="p-8 text-center bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-500">
-              Hiện chưa có suất chiếu nào được mở bán tại rạp này.
+              Hiện chưa có suất chiếu nào được mở bán cho phim này.
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
@@ -205,13 +259,13 @@ export default function MovieDetailPage() {
                   className="group p-3.5 rounded-2xl bg-slate-50 hover:bg-red-50 border border-slate-200 hover:border-red-400 text-center transition-all hover:scale-105 active:scale-95 shadow-sm"
                 >
                   <span className="text-lg font-black text-slate-900 group-hover:text-red-600 block font-mono">
-                    {st.startTime || '19:30'}
+                    {st.startTime}
                   </span>
-                  <span className="text-[10px] font-semibold text-slate-500 group-hover:text-red-500 block mt-0.5">
-                    {st.screenName || 'Phòng 1'}
+                  <span className="text-[10px] font-semibold text-slate-500 group-hover:text-red-500 block mt-0.5 truncate">
+                    {selectedCinemaId ? st.screenName : `${st.cinemaName} • ${st.screenName}`}
                   </span>
                   <span className="text-[10px] font-bold text-emerald-600 block mt-1">
-                    {Number(st.basePrice || 95000).toLocaleString()} đ
+                    {Number(st.basePrice || 0).toLocaleString('vi-VN')} đ
                   </span>
                 </button>
               ))}

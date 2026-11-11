@@ -18,7 +18,7 @@ export default function NowShowingPage({ movies = [] }) {
   const [selectedGenre, setSelectedGenre] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const genres = ['ALL', 'Hành Động', 'Hài', 'Phiêu Lưu', 'Gia Đình', 'Tâm Lý', 'Khoa Học Viễn Tưởng'];
+  const genres = ['ALL', ...new Set(movies.flatMap((m) => m.genres || []))];
 
   const filteredMovies = movies.filter((m) => {
     const matchesGenre =

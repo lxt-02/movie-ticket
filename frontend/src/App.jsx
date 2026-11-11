@@ -20,15 +20,12 @@ import FeaturesPage from './pages/FeaturesPage';
 import TermsPage from './pages/TermsPage';
 import StaffDashboardPage from './pages/StaffDashboardPage';
 import AdminDashboardPage from './pages/AdminDashboardPage';
+import SearchPage from './pages/SearchPage';
+import PaymentReturnPage from './pages/PaymentReturnPage.jsx';
 
-import {
-  getMovies,
-  searchMovies,
-  getCurrentUserProfile,
-  isAuthenticated
-} from './api';
+import { getMovies, getCurrentUserProfile, isAuthenticated } from './api';
 
-function AppLayout({ children, onSearch, currentUserProfile }) {
+function AppLayout({ children, currentUserProfile }) {
   const location = useLocation();
   const isDashboard = location.pathname.startsWith('/admin') || location.pathname.startsWith('/staff');
 
@@ -39,7 +36,7 @@ function AppLayout({ children, onSearch, currentUserProfile }) {
 
       {/* Do not render standard cinema navbar on dedicated Staff and Admin Portals */}
       {!isDashboard && (
-        <Navbar onSearch={onSearch} currentUserProfile={currentUserProfile} />
+        <Navbar currentUserProfile={currentUserProfile} />
       )}
 
       <main className="flex-1">
@@ -70,9 +67,7 @@ export default function App() {
   const loadMovies = async () => {
     setLoading(true);
     try {
-      const data = await getMovies('NOW_SHOWING');
-      const list = Array.isArray(data) ? data : data?.content || [];
-      setMovies(list);
+      setMovies(await getMovies('NOW_SHOWING'));
     } catch (e) {
       console.error('Error fetching movies:', e);
     } finally {
@@ -87,33 +82,20 @@ export default function App() {
     }
   }, []);
 
-  const handleSearch = async (keyword) => {
-    if (!keyword || !keyword.trim()) {
-      loadMovies();
-      return;
-    }
-    setLoading(true);
-    try {
-      const data = await searchMovies(keyword);
-      const list = Array.isArray(data) ? data : data?.content || [];
-      setMovies(list);
-    } catch (e) {
-      console.error('Search error:', e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <BrowserRouter>
-      <AppLayout onSearch={handleSearch} currentUserProfile={currentUserProfile}>
+      <AppLayout currentUserProfile={currentUserProfile}>
         <Routes>
           {/* 1. Public & Customer Routes */}
           <Route path="/" element={<HomePage movies={movies} loading={loading} />} />
           <Route path="/movies" element={<NowShowingPage movies={movies} />} />
           <Route path="/movies/:id" element={<MovieDetailPage />} />
+          <Route path="/search" element={<SearchPage />} />
           <Route path="/cinemas" element={<CinemasPage />} />
           <Route path="/booking/:showtimeId" element={<BookingPage currentUserProfile={currentUserProfile} />} />
+          {/* PayOS redirect về đây (PAYOS_RETURN_URL / PAYOS_CANCEL_URL) */}
+          <Route path="/payment/success" element={<PaymentReturnPage kind="success" />} />
+          <Route path="/payment/cancel" element={<PaymentReturnPage kind="cancel" />} />
           <Route path="/payment/:bookingId" element={<PaymentPage />} />
           <Route path="/my-tickets" element={<MyTicketsPage currentUserProfile={currentUserProfile} />} />
           <Route

@@ -1,692 +1,453 @@
-const API_BASE = 'http://localhost:8080/api/v1';
-const KC_URL = 'http://localhost:8180/realms/mss301/protocol/openid-connect/token';
+/**
+ * Client gọi backend qua API Gateway.
+ * - Gọi đường dẫn tương đối /api/v1/... -> Vite proxy chuyển sang gateway http://localhost:8080 (không dính CORS).
+ * - Gateway tự đọc token Keycloak và gắn X-User-Id / X-User-Role cho service, FE KHÔNG tự gửi các header này
+ *   (gateway không cho phép chúng trong CORS và còn xoá đi).
+ * - Danh sách của movie/cinema/showtime/user trả về PageResponse { items, page, size, totalElements, totalPages }.
+ */
+const API_BASE = import.meta.env.VITE_API_BASE || '/api/v1';
+const KC_BASE = import.meta.env.VITE_KEYCLOAK_URL || 'http://localhost:8180';
+const KC_REALM = import.meta.env.VITE_KEYCLOAK_REALM || 'mss301';
+const KC_CLIENT = import.meta.env.VITE_KEYCLOAK_CLIENT || 'mss301-frontend';
+const KC_TOKEN_URL = `${KC_BASE}/realms/${KC_REALM}/protocol/openid-connect/token`;
 
-// Default mock customer user ID (matches sample customer user in database)
-export const DEFAULT_CUSTOMER_ID = '10000000-0000-0000-0000-000000000001';
-
+// ---------------------------------------------------------------- token / session
 export const getAuthToken = () => localStorage.getItem('token');
-export const setAuthToken = (token) => localStorage.setItem('token', token);
 export const getUserId = () => localStorage.getItem('userId') || null;
-export const setUserId = (id) => localStorage.setItem('userId', id);
 export const getUserRole = () => localStorage.getItem('userRole') || null;
 export const isAuthenticated = () => !!localStorage.getItem('token');
 
 export function parseJwt(token) {
   try {
-    const base64Url = token.split('.')[1];
-    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-    const jsonPayload = decodeURIComponent(
+    const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const json = decodeURIComponent(
       atob(base64)
         .split('')
-        .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
         .join('')
     );
-    return JSON.parse(jsonPayload);
-  } catch (e) {
+    return JSON.parse(json);
+  } catch {
     return null;
   }
 }
 
-const getHeaders = (idempotencyKey = null) => {
-  const headers = {
-    'Content-Type': 'application/json',
-    'X-User-Id': getUserId(),
-    'X-User-Role': getUserRole(),
-  };
-  const token = getAuthToken();
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  if (idempotencyKey) {
-    headers['Idempotency-Key'] = idempotencyKey;
-  }
-  return headers;
-};
+function saveTokens(data) {
+  localStorage.setItem('token', data.access_token);
+  if (data.refresh_token) localStorage.setItem('refreshToken', data.refresh_token);
+  localStorage.setItem('tokenExpiresAt', String(Date.now() + (data.expires_in || 300) * 1000));
 
-// --- AUTH ---
-export async function loginKeycloak(username = 'customer', password = '123456') {
-  try {
-    const params = new URLSearchParams();
-    params.append('grant_type', 'password');
-    params.append('client_id', 'mss301-frontend');
-    params.append('username', username);
-    params.append('password', password);
-
-    const res = await fetch(KC_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params,
-    });
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.error_description || 'Tài khoản hoặc mật khẩu không chính xác');
-    }
-    const data = await res.json();
-    setAuthToken(data.access_token);
-
-    const payload = parseJwt(data.access_token);
-    if (payload) {
-      if (payload.sub) setUserId(payload.sub);
-      if (payload.preferred_username) localStorage.setItem('username', payload.preferred_username);
-      if (payload.email) localStorage.setItem('userEmail', payload.email);
-      const roles = payload.realm_access?.roles || [];
-      let role = 'CUSTOMER';
-      if (roles.includes('ADMIN')) role = 'ADMIN';
-      else if (roles.includes('STAFF')) role = 'STAFF';
-      localStorage.setItem('userRole', role);
-    } else {
-      localStorage.setItem('username', username);
-      localStorage.setItem('userRole', username.toUpperCase());
-    }
-    return data;
-  } catch (err) {
-    console.warn('Keycloak login error:', err.message);
-    // Dev fallback if Keycloak is temporarily paused
-    if (err.message.includes('Failed to fetch') || err.message.includes('offline')) {
-      const mockId = username === 'admin'
-        ? '10000000-0000-0000-0000-000000000004'
-        : username === 'staff'
-        ? '10000000-0000-0000-0000-000000000002'
-        : username === 'blocked'
-        ? '10000000-0000-0000-0000-000000000003'
-        : DEFAULT_CUSTOMER_ID;
-      setUserId(mockId);
-      setAuthToken('mock_token_' + username);
-      localStorage.setItem('username', username);
-      localStorage.setItem('userRole', username.toUpperCase());
-      return { access_token: 'mock_token_' + username };
-    }
-    throw err;
-  }
-}
-
-// --- ADMIN MOVIE CRUD ---
-export async function createMovie(movieData) {
-  const res = await fetch(`${API_BASE}/movies`, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify(movieData),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.message || 'Thêm phim mới thất bại');
-  return json.data || json;
-}
-
-export async function updateMovie(movieId, movieData) {
-  const res = await fetch(`${API_BASE}/movies/${movieId}`, {
-    method: 'PUT',
-    headers: getHeaders(),
-    body: JSON.stringify(movieData),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.message || 'Cập nhật phim thất bại');
-  return json.data || json;
-}
-
-export async function archiveMovie(movieId) {
-  const res = await fetch(`${API_BASE}/movies/${movieId}`, {
-    method: 'DELETE',
-    headers: getHeaders(),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.message || 'Xóa/Lưu trữ phim thất bại');
-  return json.data || json;
-}
-
-// --- ADMIN CINEMA & SCREEN CRUD ---
-export async function createCinema(cinemaData) {
-  const res = await fetch(`${API_BASE}/cinemas`, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify(cinemaData),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.message || 'Thêm rạp mới thất bại');
-  return json.data || json;
-}
-
-export async function createScreen(cinemaId, screenData) {
-  const res = await fetch(`${API_BASE}/cinemas/${cinemaId}/screens`, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify(screenData),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.message || 'Thêm phòng chiếu thất bại');
-  return json.data || json;
-}
-
-export async function getCinemaScreens(cinemaId) {
-  try {
-    const res = await fetch(`${API_BASE}/cinemas/${cinemaId}/screens`, {
-      headers: getHeaders(),
-    });
-    if (!res.ok) throw new Error('Fetch screens error');
-    const json = await res.json();
-    return json.data || json;
-  } catch (e) {
-    return [
-      { id: '32000000-0000-0000-0000-000000000001', name: 'Phòng Chiếu 1 (IMAX Laser)', screenType: 'IMAX' },
-      { id: '32000000-0000-0000-0000-000000000002', name: 'Phòng Chiếu 2 (Dolby Atmos)', screenType: 'STANDARD' },
-    ];
-  }
-}
-
-// --- SHOWTIME & BOOKING CRUD ---
-export async function createShowtime(showtimeData) {
-  const res = await fetch(`${API_BASE}/showtimes`, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify(showtimeData),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.message || 'Tạo suất chiếu mới thất bại');
-  return json.data || json;
-}
-
-export async function cancelShowtime(showtimeId) {
-  const res = await fetch(`${API_BASE}/showtimes/${showtimeId}`, {
-    method: 'DELETE',
-    headers: getHeaders(),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.message || 'Hủy suất chiếu thất bại');
-  return json.data || json;
-}
-
-export async function cancelBooking(bookingId) {
-  const res = await fetch(`${API_BASE}/bookings/${bookingId}/cancel`, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify({ reason: 'Khách hàng yêu cầu hủy vé' }),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.message || 'Hủy vé thất bại');
-  return json.data || json;
-}
-
-export async function getBookingById(bookingId) {
-  const res = await fetch(`${API_BASE}/bookings/${bookingId}`, {
-    headers: getHeaders(),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.message || 'Không tìm thấy thông tin vé');
-  return json.data || json;
+  const payload = parseJwt(data.access_token) || {};
+  if (payload.sub) localStorage.setItem('userId', payload.sub);
+  if (payload.preferred_username) localStorage.setItem('username', payload.preferred_username);
+  if (payload.email) localStorage.setItem('userEmail', payload.email);
+  const roles = payload.realm_access?.roles || [];
+  const role = roles.includes('ADMIN') ? 'ADMIN' : roles.includes('STAFF') ? 'STAFF' : 'CUSTOMER';
+  localStorage.setItem('userRole', role);
 }
 
 export function logout() {
-  localStorage.removeItem('token');
-  localStorage.removeItem('username');
-  localStorage.removeItem('userEmail');
-  localStorage.removeItem('userRole');
-  localStorage.removeItem('userId');
-  localStorage.removeItem('userAvatar');
-  localStorage.removeItem('userFullName');
+  ['token', 'refreshToken', 'tokenExpiresAt', 'username', 'userEmail', 'userRole', 'userId',
+    'userAvatar', 'userFullName'].forEach((k) => localStorage.removeItem(k));
 }
 
-// --- REGISTER ---
-export async function registerAccount({ fullName, email, username, password, phone }) {
-  // Try Keycloak or mock user creation
-  try {
-    const res = await fetch(`http://localhost:8180/realms/mss301/protocol/openid-connect/registrations`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fullName, email, username, password }),
-    });
-    if (res.ok) {
-      return await loginKeycloak(username, password);
-    }
-  } catch (e) {
-    console.warn('Direct KC registration fallback:', e);
-  }
-
-  // Fallback demo account generation
-  const newId = '10000000-0000-0000-' + Math.random().toString(16).substring(2, 6) + '-' + Date.now().toString().slice(-12);
-  setUserId(newId);
-  setAuthToken('mock_reg_token_' + Date.now());
-  localStorage.setItem('username', username);
-  localStorage.setItem('userEmail', email);
-  localStorage.setItem('userRole', 'CUSTOMER');
-  localStorage.setItem('userFullName', fullName || username);
-  return { access_token: 'mock_token', userId: newId };
-}
-
-// --- STAFF OPERATIONS ---
-export async function getBookingByCode(bookingCode) {
-  const res = await fetch(`${API_BASE}/bookings/code/${encodeURIComponent(bookingCode)}`, {
-    headers: getHeaders(),
-  });
-  const json = await res.json();
-  if (!res.ok) {
-    throw new Error(json.message || 'Không tìm thấy vé với mã này');
-  }
-  return json.data || json;
-}
-
-export async function getOutboxBacklog() {
-  try {
-    const res = await fetch(`${API_BASE}/bookings/admin/outbox`, {
-      headers: getHeaders(),
-    });
-    if (!res.ok) throw new Error('Cannot fetch outbox status');
-    const json = await res.json();
-    return json.data || json;
-  } catch (e) {
-    return { pending: 0, failed: [], paused: false };
-  }
-}
-
-export async function requeueOutboxFailed() {
-  const res = await fetch(`${API_BASE}/bookings/admin/outbox/requeue-failed`, {
+async function tokenRequest(params) {
+  const res = await fetch(KC_TOKEN_URL, {
     method: 'POST',
-    headers: getHeaders(),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: KC_CLIENT, ...params }),
   });
-  return await res.json();
-}
-
-export async function getPaymentDltStatus() {
-  try {
-    const res = await fetch(`${API_BASE}/bookings/admin/payment-events-dlt`, {
-      headers: getHeaders(),
-    });
-    if (!res.ok) throw new Error('Cannot fetch DLT status');
-    return await res.json();
-  } catch (e) {
-    return { replayRunning: false, chaosEnabled: false };
-  }
-}
-
-export async function replayPaymentDlt() {
-  const res = await fetch(`${API_BASE}/bookings/admin/payment-events-dlt/replay`, {
-    method: 'POST',
-    headers: getHeaders(),
-  });
-  return await res.json();
-}
-
-// --- USER PROFILE & ADMIN ---
-export async function getCurrentUserProfile() {
-  try {
-    const res = await fetch(`${API_BASE}/users/me`, {
-      headers: getHeaders(),
-    });
-    if (!res.ok) throw new Error('Fetch profile failed');
-    const json = await res.json();
-    return json.data || json;
-  } catch (err) {
-    return {
-      id: getUserId(),
-      fullName: localStorage.getItem('username') === 'admin' ? 'Demo Admin' : 'Demo Customer',
-      email: localStorage.getItem('userEmail') || `${localStorage.getItem('username') || 'customer'}@example.com`,
-      avatarUrl: localStorage.getItem('userAvatar') || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
-      role: getUserRole(),
-      status: 'ACTIVE',
-    };
-  }
-}
-
-export async function updateUserProfile(fullName, avatarUrl) {
-  const res = await fetch(`${API_BASE}/users/me`, {
-    method: 'PUT',
-    headers: getHeaders(),
-    body: JSON.stringify({ fullName, avatarUrl }),
-  });
-  const json = await res.json();
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(json.message || 'Cập nhật hồ sơ thất bại');
+    throw new Error(data.error_description || 'Tài khoản hoặc mật khẩu không chính xác');
   }
-  if (avatarUrl) localStorage.setItem('userAvatar', avatarUrl);
-  return json.data || json;
+  return data;
 }
 
-export async function searchUsers(keyword = '', role = '', status = '', page = 0, size = 20) {
-  let url = `${API_BASE}/users?page=${page}&size=${size}`;
-  if (keyword) url += `&q=${encodeURIComponent(keyword)}`;
-  if (role) url += `&role=${encodeURIComponent(role)}`;
-  if (status) url += `&status=${encodeURIComponent(status)}`;
-
-  const res = await fetch(url, {
-    headers: getHeaders(),
-  });
-  const json = await res.json();
-  if (!res.ok) {
-    throw new Error(json.message || 'Chỉ ADMIN mới có quyền xem danh sách người dùng!');
+/** Access token của Keycloak sống ~5 phút: làm mới bằng refresh token trước khi hết hạn. */
+let refreshing = null;
+async function ensureFreshToken() {
+  const token = getAuthToken();
+  if (!token) return null;
+  const expiresAt = Number(localStorage.getItem('tokenExpiresAt') || 0);
+  if (Date.now() < expiresAt - 30_000) return token;
+  const refreshToken = localStorage.getItem('refreshToken');
+  if (!refreshToken) return token;
+  if (!refreshing) {
+    refreshing = tokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken })
+      .then((data) => {
+        saveTokens(data);
+        return data.access_token;
+      })
+      .catch(() => {
+        logout();
+        return null;
+      })
+      .finally(() => {
+        refreshing = null;
+      });
   }
-  return json.data || json;
+  return refreshing;
 }
 
-export async function changeUserStatus(userId, status) {
-  const res = await fetch(`${API_BASE}/users/${userId}/status`, {
-    method: 'PATCH',
-    headers: getHeaders(),
-    body: JSON.stringify({ status }),
-  });
-  const json = await res.json();
-  if (!res.ok) {
-    throw new Error(json.message || 'Thay đổi trạng thái tài khoản thất bại');
+// ---------------------------------------------------------------- http helper
+export class ApiError extends Error {
+  constructor(message, status, body) {
+    super(message);
+    this.status = status;
+    this.body = body;
   }
-  return json.data || json;
 }
 
-// --- MOVIES ---
-export async function getMovies(status = 'NOW_SHOWING') {
-  try {
-    const res = await fetch(`${API_BASE}/movies?status=${status}&page=0&size=20`, {
-      headers: getHeaders(),
+async function request(path, { method = 'GET', body, query, idempotencyKey } = {}) {
+  let url = `${API_BASE}${path}`;
+  if (query) {
+    const qs = new URLSearchParams();
+    Object.entries(query).forEach(([k, v]) => {
+      if (v === undefined || v === null || v === '') return;
+      if (Array.isArray(v)) v.forEach((item) => item !== '' && qs.append(k, item));
+      else qs.append(k, v);
     });
-    if (!res.ok) throw new Error('Fetch movies error');
-    const json = await res.json();
-    return json.data || json;
-  } catch (e) {
-    console.warn('API error, using sample movies:', e);
-    return getSampleMovies();
+    const s = qs.toString();
+    if (s) url += `?${s}`;
   }
+
+  const headers = {};
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+  const token = await ensureFreshToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let res;
+  try {
+    res = await fetch(url, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
+  } catch {
+    throw new ApiError('Không kết nối được API Gateway (http://localhost:8080). Kiểm tra backend đã chạy chưa.', 0);
+  }
+
+  const text = await res.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = null;
+  }
+
+  if (!res.ok) {
+    if (res.status === 401 && token) logout();
+    const message =
+      json?.message ||
+      json?.error ||
+      (res.status === 401
+        ? 'Bạn cần đăng nhập để thực hiện thao tác này'
+        : res.status === 403
+        ? 'Bạn không có quyền thực hiện thao tác này'
+        : res.status === 429
+        ? 'Bạn thao tác quá nhanh, vui lòng thử lại sau ít giây'
+        : `Lỗi ${res.status} khi gọi ${path}`);
+    throw new ApiError(message, res.status, json);
+  }
+  return json && Object.prototype.hasOwnProperty.call(json, 'data') ? json.data : json;
 }
 
-export async function searchMovies(q) {
-  try {
-    const res = await fetch(`${API_BASE}/search/movies?q=${encodeURIComponent(q)}&page=0&size=12`, {
-      headers: getHeaders(),
-    });
-    if (!res.ok) throw new Error('Search movies error');
-    const json = await res.json();
-    return json.data || json;
-  } catch (e) {
-    return getSampleMovies().filter(m => m.title.toLowerCase().includes(q.toLowerCase()));
-  }
+const itemsOf = (page) => (Array.isArray(page) ? page : page?.items || []);
+const newIdempotencyKey = () =>
+  (crypto.randomUUID && crypto.randomUUID()) || `bk-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+// ---------------------------------------------------------------- normalizers (DTO backend -> shape UI dùng)
+const VN_TZ = 'Asia/Ho_Chi_Minh';
+export const fmtTime = (iso) =>
+  iso ? new Date(iso).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', timeZone: VN_TZ }) : '';
+export const fmtDate = (iso) =>
+  iso ? new Date(iso).toLocaleDateString('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit', timeZone: VN_TZ }) : '';
+export const fmtDateTime = (iso) => (iso ? `${fmtTime(iso)} • ${fmtDate(iso)}` : '');
+export const fmtMoney = (v) => `${Number(v || 0).toLocaleString('vi-VN')} đ`;
+
+const FALLBACK_POSTER = 'https://placehold.co/600x900/1e293b/f8fafc?text=MTK+Cinema';
+
+/** MovieResponse (movie-service) hoặc Hit (search-service) -> movie cho UI. */
+export function normalizeMovie(m) {
+  if (!m) return null;
+  const genres = (m.genres || []).map((g) => (typeof g === 'string' ? g : g.name));
+  const directors = (m.directors || []).map((p) => (typeof p === 'string' ? p : p.name));
+  const actors = (m.cast || m.actors || []).map((p) => (typeof p === 'string' ? p : p.name));
+  return {
+    ...m,
+    genres,
+    directorList: directors,
+    actorList: actors,
+    director: directors.join(', '),
+    actors: actors.join(', '),
+    synopsis: m.description || '',
+    posterUrl: m.posterUrl || FALLBACK_POSTER,
+    bannerUrl: m.posterUrl || FALLBACK_POSTER,
+    format: [m.language, m.country].filter(Boolean).join(' • '),
+  };
+}
+
+export function normalizeShowtime(st) {
+  return {
+    ...st,
+    startAt: st.startTime,
+    endAt: st.endTime,
+    startTime: fmtTime(st.startTime),
+    endTime: fmtTime(st.endTime),
+    date: fmtDate(st.startTime),
+    dateKey: st.startTime
+      ? new Date(st.startTime).toLocaleDateString('en-CA', { timeZone: VN_TZ })
+      : '',
+  };
+}
+
+export function normalizeSeat(s) {
+  return {
+    ...s,
+    id: s.showtimeSeatId,
+    seatCode: s.seatLabel,
+    rowCode: s.rowLabel,
+  };
+}
+
+// ---------------------------------------------------------------- AUTH
+export async function loginKeycloak(username, password) {
+  const data = await tokenRequest({ grant_type: 'password', username, password });
+  saveTokens(data);
+  return data;
+}
+
+/** Keycloak không có API đăng ký công khai: chuyển sang trang đăng ký của realm (registrationAllowed = true). */
+export function getRegisterUrl() {
+  const params = new URLSearchParams({
+    client_id: KC_CLIENT,
+    response_type: 'code',
+    scope: 'openid',
+    redirect_uri: `${window.location.origin}/login`,
+  });
+  return `${KC_BASE}/realms/${KC_REALM}/protocol/openid-connect/registrations?${params}`;
+}
+
+export async function registerAccount() {
+  window.location.href = getRegisterUrl();
+  return new Promise(() => {});
+}
+
+// ---------------------------------------------------------------- MOVIES (movie-service)
+export async function getMovies(status = 'NOW_SHOWING', { q, page = 0, size = 20 } = {}) {
+  const data = await request('/movies', { query: { status, q, page, size } });
+  return itemsOf(data).map(normalizeMovie);
 }
 
 export async function getMovieDetails(movieId) {
-  try {
-    const res = await fetch(`${API_BASE}/movies/${movieId}`, {
-      headers: getHeaders(),
-    });
-    if (!res.ok) throw new Error('Get movie detail error');
-    const json = await res.json();
-    return json.data || json;
-  } catch (e) {
-    return getSampleMovies().find(m => m.id === movieId) || getSampleMovies()[0];
-  }
+  return normalizeMovie(await request(`/movies/${movieId}`));
 }
 
-// --- CINEMAS & SHOWTIMES ---
-export async function getCinemas(city = 'Ho Chi Minh City') {
-  try {
-    const res = await fetch(`${API_BASE}/cinemas?city=${encodeURIComponent(city)}`, {
-      headers: getHeaders(),
-    });
-    if (!res.ok) throw new Error('Get cinemas error');
-    const json = await res.json();
-    return json.data || json;
-  } catch (e) {
-    return [
-      { id: '30000000-0000-0000-0000-000000000001', name: 'CineStar Quốc Thanh', address: '271 Nguyễn Trãi, Q.1, TP.HCM', city: 'Ho Chi Minh City' },
-      { id: '30000000-0000-0000-0000-000000000002', name: 'CineStar Hai Bà Trưng', address: '135 Hai Bà Trưng, Q.3, TP.HCM', city: 'Ho Chi Minh City' },
-    ];
-  }
+export async function getGenres() {
+  return request('/movies/genres');
 }
 
-export async function getShowtimes(movieId, status = 'SELLING') {
-  try {
-    const res = await fetch(`${API_BASE}/showtimes?movieId=${movieId}&status=${status}`, {
-      headers: getHeaders(),
-    });
-    if (!res.ok) throw new Error('Get showtimes error');
-    const json = await res.json();
-    return json.data || json;
-  } catch (e) {
-    return [
-      {
-        id: '50000000-0000-0000-0000-000000000001',
-        movieId: movieId,
-        screenId: '32000000-0000-0000-0000-000000000001',
-        cinemaName: 'CineStar Quốc Thanh',
-        screenName: 'Phòng Chiếu 1 (IMAX)',
-        startTime: '19:30',
-        date: 'Hôm nay',
-        basePrice: 95000,
-        status: 'SELLING',
-      },
-      {
-        id: '50000000-0000-0000-0000-000000000002',
-        movieId: movieId,
-        screenId: '32000000-0000-0000-0000-000000000001',
-        cinemaName: 'CineStar Quốc Thanh',
-        screenName: 'Phòng Chiếu 1 (IMAX)',
-        startTime: '21:45',
-        date: 'Hôm nay',
-        basePrice: 95000,
-        status: 'SELLING',
-      },
-    ];
-  }
+export async function createMovie(movieData) {
+  return request('/movies', { method: 'POST', body: movieData });
 }
 
-// --- SEAT LAYOUT & REALTIME STATUS ---
+export async function updateMovie(movieId, movieData) {
+  return request(`/movies/${movieId}`, { method: 'PUT', body: movieData });
+}
+
+export async function archiveMovie(movieId) {
+  return request(`/movies/${movieId}`, { method: 'DELETE' });
+}
+
+// ---------------------------------------------------------------- SEARCH (search-service, Elasticsearch)
+/**
+ * GET /api/v1/search/movies — full-text + facet + highlight trên Elasticsearch.
+ * Trả nguyên MovieSearchResult: { items, page, size, totalElements, totalPages, facets, tookMs }.
+ */
+export async function searchMoviesES({
+  q, person, genres, status, ageRating, language, country,
+  releaseFrom, releaseTo, durationMin, durationMax, sort, page = 0, size = 12,
+} = {}) {
+  const data = await request('/search/movies', {
+    query: {
+      q, person, genres, status, ageRating, language, country,
+      releaseFrom, releaseTo, durationMin, durationMax, sort, page, size,
+    },
+  });
+  return {
+    ...data,
+    items: (data?.items || []).map((hit) => ({ ...normalizeMovie(hit), highlight: hit.highlight || {} })),
+    facets: data?.facets || {},
+  };
+}
+
+/** Giữ tên cũ: tìm nhanh theo từ khoá, trả về danh sách phim. */
+export async function searchMovies(q) {
+  return (await searchMoviesES({ q })).items;
+}
+
+/** GET /api/v1/search/movies/suggest — gợi ý khi đang gõ (completion/prefix). */
+export async function suggestMovies(q, size = 6) {
+  if (!q || !q.trim()) return [];
+  return request('/search/movies/suggest', { query: { q, size } });
+}
+
+// ---------------------------------------------------------------- CINEMAS & SCREENS (cinema-service)
+export async function getCinemas(city, { q, page = 0, size = 50 } = {}) {
+  const data = await request('/cinemas', { query: { city, q, page, size } });
+  return itemsOf(data);
+}
+
+export async function getCinemaById(cinemaId) {
+  return request(`/cinemas/${cinemaId}`);
+}
+
+export async function getCinemaScreens(cinemaId) {
+  return request(`/cinemas/${cinemaId}/screens`);
+}
+
+export async function createCinema(cinemaData) {
+  return request('/cinemas', { method: 'POST', body: cinemaData });
+}
+
+export async function createScreen(cinemaId, screenData) {
+  return request(`/cinemas/${cinemaId}/screens`, { method: 'POST', body: screenData });
+}
+
+// ---------------------------------------------------------------- SHOWTIMES (showtime-service)
+/** Khách chỉ nhận suất SCHEDULED/SELLING sắp chiếu; tham số status chỉ có tác dụng với ADMIN. */
+export async function getShowtimes(movieId, { cinemaId, date, status, page = 0, size = 100 } = {}) {
+  const data = await request('/showtimes', { query: { movieId, cinemaId, date, status, page, size } });
+  return itemsOf(data).map(normalizeShowtime);
+}
+
+export async function getShowtimeById(showtimeId) {
+  return normalizeShowtime(await request(`/showtimes/${showtimeId}`));
+}
+
 export async function getShowtimeSeats(showtimeId) {
-  try {
-    const res = await fetch(`${API_BASE}/showtimes/${showtimeId}/seats`, {
-      headers: getHeaders(),
-    });
-    if (!res.ok) throw new Error('Get seats error');
-    const json = await res.json();
-    return json.data || json;
-  } catch (e) {
-    return getSampleSeats();
-  }
+  return (await request(`/showtimes/${showtimeId}/seats`)).map(normalizeSeat);
 }
 
-// --- BOOKING ---
-export async function createBooking(showtimeId, seatsInput) {
-  const idempotencyKey = 'bk_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
-  
-  // Match backend CreateBookingRequest & CreateBookingSeatRequest DTOs
-  const formattedSeats = Array.isArray(seatsInput)
-    ? seatsInput.map((s) => {
-        if (typeof s === 'string') {
-          return {
-            showtimeSeatId: s,
-            seatLabel: 'Ghế',
-            unitPrice: 95000,
-          };
-        }
-        return {
-          showtimeSeatId: s.showtimeSeatId || s.id,
-          seatId: s.seatId || null,
-          seatLabel: s.seatLabel || s.seatCode || 'Ghế',
-          unitPrice: s.unitPrice || s.price || 95000,
-        };
-      })
-    : [];
+export async function createShowtime(showtimeData) {
+  return request('/showtimes', { method: 'POST', body: showtimeData });
+}
 
+export async function cancelShowtime(showtimeId) {
+  return request(`/showtimes/${showtimeId}`, { method: 'DELETE' });
+}
+
+// ---------------------------------------------------------------- BOOKINGS (booking-service)
+/** POST /api/v1/bookings — giữ ghế + tạo booking PENDING; payment được tạo bất đồng bộ qua Kafka. */
+export async function createBooking(showtimeId, seats, showtime) {
   const body = {
     showtimeId,
-    seats: formattedSeats,
+    movieTitle: showtime?.movieTitle,
+    cinemaName: showtime?.cinemaName,
+    screenName: showtime?.screenName,
+    startTime: showtime?.startAt,
+    seats: seats.map((s) => ({
+      showtimeSeatId: s.showtimeSeatId || s.id,
+      seatId: s.seatId,
+      seatLabel: s.seatLabel || s.seatCode,
+      unitPrice: s.price,
+    })),
   };
-
-  const res = await fetch(`${API_BASE}/bookings`, {
-    method: 'POST',
-    headers: getHeaders(idempotencyKey),
-    body: JSON.stringify(body),
-  });
-
-  const json = await res.json();
-  if (!res.ok) {
-    throw new Error(json.message || json.error || 'Đặt vé thất bại! Ghế có thể đã bị giữ hoặc tài khoản bị khóa.');
-  }
-  return json.data || json;
+  const booking = await request('/bookings', { method: 'POST', body, idempotencyKey: newIdempotencyKey() });
+  localStorage.setItem('pendingBookingId', booking.id);
+  return booking;
 }
 
 export async function getUserBookings() {
-  try {
-    const res = await fetch(`${API_BASE}/bookings`, {
-      headers: getHeaders(),
-    });
-    if (!res.ok) throw new Error('Get bookings error');
-    const json = await res.json();
-    return json.data || json;
-  } catch (e) {
-    return [];
-  }
+  return request('/bookings');
 }
 
-// --- PAYMENT & PAYOS SYNC ---
+export async function getBookingById(bookingId) {
+  return request(`/bookings/${bookingId}`);
+}
+
+export async function getBookingByCode(bookingCode) {
+  return request(`/bookings/code/${encodeURIComponent(bookingCode)}`);
+}
+
+export async function cancelBooking(bookingId, reason = 'Khách hàng yêu cầu hủy vé') {
+  return request(`/bookings/${bookingId}/cancel`, { method: 'POST', body: { reason } });
+}
+
+export async function retryBookingPayment(bookingId) {
+  return request(`/bookings/${bookingId}/payment-retry`, { method: 'POST' });
+}
+
+// ---------------------------------------------------------------- PAYMENTS (payment-service, PayOS)
 export async function getPaymentByBooking(bookingId) {
-  const res = await fetch(`${API_BASE}/payments/by-booking/${bookingId}`, {
-    headers: getHeaders(),
-  });
-  if (!res.ok) throw new Error('Payment not yet ready');
-  const json = await res.json();
-  return json.data || json;
+  return request(`/payments/by-booking/${bookingId}`);
 }
 
+/** Hỏi lại PayOS trạng thái thật của payment mới nhất (không tin query string PayOS trả về). */
 export async function syncPaymentByBooking(bookingId) {
-  const res = await fetch(`${API_BASE}/payments/by-booking/${bookingId}/sync`, {
-    method: 'POST',
-    headers: getHeaders(),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.message || 'Đồng bộ trạng thái PayOS thất bại');
-  return json.data || json;
+  return request(`/payments/by-booking/${bookingId}/sync`, { method: 'POST' });
 }
 
-export async function mockPayByBooking(bookingId) {
-  try {
-    const res = await fetch(`${API_BASE}/payments/by-booking/${bookingId}/mock-pay`, {
-      method: 'POST',
-      headers: getHeaders(),
-    });
-    const json = await res.json();
-    if (res.ok) return json.data || json;
-  } catch (e) {
-    // If backend only has PayOS webhook/sync without mock-pay endpoint, trigger sync
+/** Tên cũ, giữ cho component cũ: giờ chỉ đồng bộ trạng thái thật từ PayOS, không còn giả lập. */
+export const mockPayByBooking = syncPaymentByBooking;
+
+/** Chờ payment được tạo (booking -> Kafka -> payment-service), tối đa ~timeoutMs. */
+export async function waitForPayment(bookingId, { timeoutMs = 20000, intervalMs = 1500 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     try {
-      return await syncPaymentByBooking(bookingId);
-    } catch (syncErr) {
-      // Demo fallback return
-      return { status: 'PAID', amount: 190000, bookingId };
+      const p = await getPaymentByBooking(bookingId);
+      if (p) return p;
+    } catch (e) {
+      if (e.status && e.status !== 404) throw e;
     }
+    await new Promise((r) => setTimeout(r, intervalMs));
   }
-  return { status: 'PAID', amount: 190000, bookingId };
+  return null;
 }
 
-// Sample fallback movies with CGV authentic lineup
-function getSampleMovies() {
-  return [
-    {
-      id: '20000000-0000-0000-0000-000000000010',
-      title: 'BÒ SỮA BAY',
-      originalTitle: 'Flying Dairy Cow',
-      durationMinutes: 115,
-      releaseDate: '2026-11-06',
-      ageRating: 'P',
-      genres: ['Hài', 'Phiêu Lưu', 'Gia Đình'],
-      posterUrl: 'https://images.unsplash.com/photo-1500595046743-cd271d694d30?w=600&auto=format&fit=crop&q=80',
-      bannerUrl: 'https://images.unsplash.com/photo-1500595046743-cd271d694d30?w=1200&auto=format&fit=crop&q=80',
-      synopsis: 'Dự án phim điện ảnh đặc sắc được tuyển chọn APM & DANAFF. Câu chuyện hài hước, xúc động về hành trình theo đuổi ước mơ kỳ lạ của nhóm bạn trẻ nông thôn cùng chú bò sữa đặc biệt.',
-      director: 'Nguyễn Phạm Thành Đạt',
-      actors: 'Nguyễn Hùng, Ngọc Xuân, Võ Điền Gia Huy, Tiểu Vy, Huy Tít',
-      format: '2D Digital • IMAX',
-    },
-    {
-      id: '20000000-0000-0000-0000-000000000011',
-      title: 'THIÊN ĐƯỜNG TĂM TỐI',
-      originalTitle: 'Dark Paradise',
-      durationMinutes: 128,
-      releaseDate: '2026-11-06',
-      ageRating: 'T18',
-      genres: ['Tâm Lý', 'Giật Gân', 'Kinh Dị'],
-      posterUrl: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=600&auto=format&fit=crop&q=80',
-      bannerUrl: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=1200&auto=format&fit=crop&q=80',
-      synopsis: 'Tác phẩm điện ảnh tâm lý hồi hộp nghẹt thở. Một kỳ nghỉ định mệnh mở ra bí mật kinh hoàng đằng sau vẻ hào nhoáng của khu nghỉ dưỡng biệt lập.',
-      director: 'Trần Bửu Lộc',
-      actors: 'Quang Tuấn, Hoàng Yến Chibi, Quốc Cường',
-      format: '2D • 4DX',
-    },
-    {
-      id: '20000000-0000-0000-0000-000000000012',
-      title: 'VENOM: KÈO CUỐI',
-      originalTitle: 'Venom: The Last Dance',
-      durationMinutes: 110,
-      releaseDate: '2026-10-25',
-      ageRating: 'T16',
-      genres: ['Hành Động', 'Khoa Học Viễn Tưởng', 'Kỳ Ảo'],
-      posterUrl: 'https://images.unsplash.com/photo-1563089145-599997674d42?w=600&auto=format&fit=crop&q=80',
-      bannerUrl: 'https://images.unsplash.com/photo-1563089145-599997674d42?w=1200&auto=format&fit=crop&q=80',
-      synopsis: 'Eddie Brock và Venom đứng trước ngã rẽ sinh tử khi bị cả thế giới loài người và chủng tộc nguyên bản săn đuổi trong cuộc chạm trán định mệnh cuối cùng.',
-      director: 'Kelly Marcel',
-      actors: 'Tom Hardy, Chiwetel Ejiofor, Juno Temple',
-      format: 'IMAX • 4DX • ScreenX',
-    },
-    {
-      id: '20000000-0000-0000-0000-000000000013',
-      title: 'CÔ DÂU HÀO MÔN',
-      originalTitle: 'The Rich Bride',
-      durationMinutes: 114,
-      releaseDate: '2026-10-18',
-      ageRating: 'T16',
-      genres: ['Hài', 'Tâm Lý', 'Gia Đình'],
-      posterUrl: 'https://images.unsplash.com/photo-1519741497674-611481863552?w=600&auto=format&fit=crop&q=80',
-      bannerUrl: 'https://images.unsplash.com/photo-1519741497674-611481863552?w=1200&auto=format&fit=crop&q=80',
-      synopsis: 'Một phi vụ "phông bạt" tinh vi để bước chân vào giới thượng lưu của một gia đình bình dân nhưng bất ngờ vướng vào những toan tính không ngờ.',
-      director: 'Vũ Ngọc Đãng',
-      actors: 'Uyển Ân, Thu Trang, Kiều Minh Tuấn, Lê Giang',
-      format: '2D Digital',
-    },
-    {
-      id: '20000000-0000-0000-0000-000000000001',
-      title: 'AVATAR: DÒNG CHẢY CỦA NƯỚC',
-      originalTitle: 'Avatar: The Way of Water',
-      durationMinutes: 192,
-      releaseDate: '2026-10-15',
-      ageRating: 'T13',
-      genres: ['Hành Động', 'Khoa Học Viễn Tưởng', 'Phiêu Lưu'],
-      posterUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&auto=format&fit=crop&q=80',
-      bannerUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1200&auto=format&fit=crop&q=80',
-      synopsis: 'Lấy bối cảnh hơn một thập kỷ sau những sự kiện của phần phim đầu tiên, bộ phim kể câu chuyện về gia đình Sully và những hiểm nguy họ phải đối mặt để bảo vệ lẫn nhau.',
-      director: 'James Cameron',
-      actors: 'Sam Worthington, Zoe Saldana, Sigourney Weaver',
-      format: 'IMAX 3D',
-    },
-    {
-      id: '20000000-0000-0000-0000-000000000002',
-      title: 'LẬT MẶT 7: MỘT ĐIỀU ƯỚC',
-      originalTitle: 'Face Off 7: One Wish',
-      durationMinutes: 138,
-      releaseDate: '2026-10-20',
-      ageRating: 'T16',
-      genres: ['Gia Đình', 'Chính Kịch', 'Hài'],
-      posterUrl: 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=600&auto=format&fit=crop&q=80',
-      bannerUrl: 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1200&auto=format&fit=crop&q=80',
-      synopsis: 'Câu chuyện cảm động về tình mẫu tử của người mẹ già 73 tuổi cùng 5 người con đã trưởng thành. Mỗi người một hoàn cảnh và ước nguyện hướng về gia đình.',
-      director: 'Lý Hải',
-      actors: 'Thanh Hiền, Trương Minh Cường, Đinh Y Nhung',
-      format: '2D Digital',
-    },
-  ];
+/** Chờ booking ra trạng thái cuối (CONFIRMED / CANCELLED / EXPIRED...). */
+export async function pollBookingUntilSettled(bookingId, { timeoutMs = 20000, intervalMs = 1500 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let booking = await getBookingById(bookingId);
+  while (['PENDING', 'CONFIRMING'].includes(booking.status) && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+    booking = await getBookingById(bookingId);
+  }
+  return booking;
 }
 
-// Sample fallback seats
-function getSampleSeats() {
-  const rows = ['A', 'B', 'C', 'D', 'E'];
-  const seats = [];
-  rows.forEach((r, rowIdx) => {
-    for (let c = 1; c <= 8; c++) {
-      const seatCode = `${r}${c}`;
-      const isVip = rowIdx >= 2 && rowIdx <= 3;
-      const isCouple = rowIdx === 4 && (c === 4 || c === 5);
-      const isBooked = (r === 'A' && (c === 1 || c === 2)) || (r === 'C' && c === 4);
-      const isHeld = r === 'B' && c === 3;
-      seats.push({
-        id: `51000000-0000-0000-0000-0000000000${rowIdx * 8 + c}`,
-        seatCode,
-        rowCode: r,
-        seatNumber: c,
-        seatType: isCouple ? 'COUPLE' : isVip ? 'VIP' : 'STANDARD',
-        status: isBooked ? 'BOOKED' : isHeld ? 'HELD' : 'AVAILABLE',
-        price: isCouple ? 190000 : isVip ? 115000 : 95000,
-      });
-    }
-  });
-  return seats;
+// ---------------------------------------------------------------- STAFF / OPS
+export async function getOutboxBacklog() {
+  return request('/bookings/admin/outbox');
+}
+
+export async function requeueOutboxFailed() {
+  return request('/bookings/admin/outbox/requeue-failed', { method: 'POST' });
+}
+
+export async function getPaymentDltStatus() {
+  return request('/bookings/admin/payment-events-dlt');
+}
+
+export async function replayPaymentDlt() {
+  return request('/bookings/admin/payment-events-dlt/replay', { method: 'POST' });
+}
+
+// ---------------------------------------------------------------- USERS (user-service)
+export async function getCurrentUserProfile() {
+  return request('/users/me');
+}
+
+export async function updateUserProfile(fullName, avatarUrl) {
+  const user = await request('/users/me', { method: 'PUT', body: { fullName, avatarUrl } });
+  if (avatarUrl) localStorage.setItem('userAvatar', avatarUrl);
+  return user;
+}
+
+/** Trả PageResponse { items, ... } (AdminDashboard đọc data.items). */
+export async function searchUsers(keyword = '', role = '', status = '', page = 0, size = 20) {
+  return request('/users', { query: { q: keyword, role, status, page, size } });
+}
+
+export async function changeUserStatus(userId, status) {
+  return request(`/users/${userId}/status`, { method: 'PATCH', body: { status } });
 }
