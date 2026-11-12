@@ -89,12 +89,13 @@ export default function AdminDashboardPage({ currentUserProfile }) {
   const [showtimesLoading, setShowtimesLoading] = useState(false);
   const [selectedMovieForShowtime, setSelectedMovieForShowtime] = useState('');
   const [showShowtimeModal, setShowShowtimeModal] = useState(false);
+  const [screensForShowtime, setScreensForShowtime] = useState([]);
   const [showtimeForm, setShowtimeForm] = useState({
     movieId: '',
     cinemaId: '',
-    screenId: '32000000-0000-0000-0000-000000000001',
-    cinemaName: 'MTK Landmark 81',
-    screenName: 'Phòng Chiếu 1 (IMAX Laser)',
+    screenId: '',
+    cinemaName: '',
+    screenName: '',
     startTime: '19:30',
     date: '2026-11-15',
     basePrice: 95000
@@ -150,6 +151,23 @@ export default function AdminDashboardPage({ currentUserProfile }) {
     }
   };
 
+  const fetchScreensForCinema = async (cinemaId) => {
+    try {
+      const data = await getCinemaScreens(cinemaId);
+      const list = Array.isArray(data) ? data : [];
+      setScreensForShowtime(list);
+      if (list.length > 0) {
+        setShowtimeForm(prev => ({ ...prev, screenId: list[0].id, screenName: list[0].name }));
+      } else {
+        setShowtimeForm(prev => ({ ...prev, screenId: '', screenName: '' }));
+      }
+    } catch (err) {
+      console.warn('Error loading screens:', err);
+      setScreensForShowtime([]);
+      setShowtimeForm(prev => ({ ...prev, screenId: '', screenName: '' }));
+    }
+  };
+
   const fetchCinemasList = async () => {
     setCinemasLoading(true);
     try {
@@ -158,6 +176,7 @@ export default function AdminDashboardPage({ currentUserProfile }) {
       setCinemas(list);
       if (list.length > 0) {
         setShowtimeForm(prev => ({ ...prev, cinemaId: list[0].id, cinemaName: list[0].name }));
+        fetchScreensForCinema(list[0].id);
       }
     } catch (err) {
       console.warn('Error loading cinemas:', err);
@@ -327,9 +346,14 @@ export default function AdminDashboardPage({ currentUserProfile }) {
   // --- Handlers: Showtimes ---
   const handleCreateShowtime = async (e) => {
     e.preventDefault();
+    if (!showtimeForm.screenId) {
+      showNotification('Vui lòng chọn phòng chiếu!', true);
+      return;
+    }
     try {
       await createShowtime({
         movieId: showtimeForm.movieId,
+        cinemaId: showtimeForm.cinemaId,
         screenId: showtimeForm.screenId,
         startTime: `${showtimeForm.date}T${showtimeForm.startTime}:00`,
         basePrice: Number(showtimeForm.basePrice)
@@ -338,19 +362,8 @@ export default function AdminDashboardPage({ currentUserProfile }) {
       setShowShowtimeModal(false);
       fetchShowtimesList(showtimeForm.movieId);
     } catch (err) {
-      const mockNewShowtime = {
-        id: 'st_' + Date.now(),
-        movieId: showtimeForm.movieId,
-        cinemaName: showtimeForm.cinemaName,
-        screenName: showtimeForm.screenName,
-        startTime: showtimeForm.startTime,
-        date: showtimeForm.date,
-        basePrice: Number(showtimeForm.basePrice),
-        status: 'SELLING'
-      };
-      setShowtimes([mockNewShowtime, ...showtimes]);
-      showNotification('Đã tạo suất chiếu mới!');
-      setShowShowtimeModal(false);
+      const msg = err?.response?.data?.message || err?.message || 'Tạo suất chiếu thất bại!';
+      showNotification(msg, true);
     }
   };
 
@@ -1253,13 +1266,37 @@ export default function AdminDashboardPage({ currentUserProfile }) {
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Cụm Rạp *</label>
                 <select
-                  value={showtimeForm.cinemaName}
-                  onChange={(e) => setShowtimeForm({ ...showtimeForm, cinemaName: e.target.value })}
+                  value={showtimeForm.cinemaId}
+                  onChange={(e) => {
+                    const selected = cinemas.find(c => c.id === e.target.value);
+                    setShowtimeForm({ ...showtimeForm, cinemaId: e.target.value, cinemaName: selected?.name || '', screenId: '', screenName: '' });
+                    fetchScreensForCinema(e.target.value);
+                  }}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-red-500 font-medium"
                 >
                   {cinemas.map((c) => (
-                    <option key={c.id} value={c.name}>{c.name}</option>
+                    <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Phòng Chiếu *</label>
+                <select
+                  value={showtimeForm.screenId}
+                  onChange={(e) => {
+                    const selected = screensForShowtime.find(s => s.id === e.target.value);
+                    setShowtimeForm({ ...showtimeForm, screenId: e.target.value, screenName: selected?.name || '' });
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-red-500 font-medium"
+                >
+                  {screensForShowtime.length === 0 ? (
+                    <option value="">-- Chưa có phòng chiếu --</option>
+                  ) : (
+                    screensForShowtime.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))
+                  )}
                 </select>
               </div>
 
